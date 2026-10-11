@@ -59,7 +59,7 @@ function control(label, testId, action, className) {
 }
 
 export function createTutorial({ onComplete, onClose } = {}) {
-  let opened = false, index = 0, completed = false, frame = 0;
+  let opened = false, index = 0, completed = false, frame = 0, refreshTarget = false;
   let backdrop, card, spotlight, previousFocus, previousOverflow;
 
   function target() { return document.querySelector(steps[index].target); }
@@ -67,44 +67,52 @@ export function createTutorial({ onComplete, onClose } = {}) {
   function position({ scroll = false } = {}) {
     if (!opened) return;
     const anchor = target();
-    const width = window.innerWidth, height = window.innerHeight;
-    const mobile = width < 760, margin = mobile ? 12 : 18, gap = 14;
-    card.style.width = `${Math.min(360, width - margin * 2)}px`;
-    card.style.maxHeight = `${Math.max(100, Math.min(mobile ? 270 : 440, height - margin * 2))}px`;
+    const viewport = window.visualViewport;
+    const overlayStyle = window.getComputedStyle(backdrop);
+    const safeInset = side => Number.parseFloat(overlayStyle.getPropertyValue(`--tour-safe-${side}`)) || 0;
+    const width = (viewport?.width || window.innerWidth) - safeInset('left') - safeInset('right');
+    const height = (viewport?.height || window.innerHeight) - safeInset('top') - safeInset('bottom');
+    const viewportLeft = (viewport?.offsetLeft || 0) + safeInset('left'), viewportTop = (viewport?.offsetTop || 0) + safeInset('top');
+    const viewportRight = viewportLeft + width, viewportBottom = viewportTop + height;
+    const compact = window.innerWidth <= 900 || height < 500, margin = compact ? 12 : 18, gap = 14;
+    card.style.width = `${Math.max(1, Math.min(360, width - margin * 2))}px`;
+    // Leave the highlighted heading in view while giving the explanation room to breathe.
+    const headingSpace = compact ? Math.min(96, height * .24) : 0;
+    card.style.maxHeight = `${Math.max(1, Math.min(compact ? Math.min(460, height * .62) : 440, height - margin * 2 - headingSpace - (compact ? gap : 0)))}px`;
     if (scroll && anchor) {
       const header = document.querySelector('.site-header');
       const headerStyle = header && window.getComputedStyle(header);
-      const headerBottom = header && ['sticky', 'fixed'].includes(headerStyle.position) ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
-      const top = Math.max(margin + 8, headerBottom + margin);
+      const headerBottom = header && ['sticky', 'fixed'].includes(headerStyle.position) ? Math.max(viewportTop, header.getBoundingClientRect().bottom) : viewportTop;
+      const top = Math.max(viewportTop + margin + 8, headerBottom + margin);
       const destination = Math.max(0, window.scrollY + anchor.getBoundingClientRect().top - top);
       // Instant movement keeps each highlighted heading visible without animation or a timer.
       window.scrollTo({ top: destination, behavior: 'instant' });
     }
     const rect = anchor?.getBoundingClientRect();
     const panel = card.getBoundingClientRect();
-    let left = (width - panel.width) / 2, top = height - panel.height - margin;
-    if (rect && !mobile) {
-      if (width - rect.right - gap - margin >= panel.width) {
+    let left = viewportLeft + (width - panel.width) / 2, top = viewportBottom - panel.height - margin;
+    if (rect && !compact) {
+      if (viewportRight - rect.right - gap - margin >= panel.width) {
         left = rect.right + gap;
         top = rect.top;
-      } else if (rect.left - gap - margin >= panel.width) {
+      } else if (rect.left - viewportLeft - gap - margin >= panel.width) {
         left = rect.left - gap - panel.width;
         top = rect.top;
-      } else if (height - rect.bottom - gap - margin >= panel.height) {
+      } else if (viewportBottom - rect.bottom - gap - margin >= panel.height) {
         top = rect.bottom + gap;
-      } else if (rect.top - gap - margin >= panel.height) {
+      } else if (rect.top - viewportTop - gap - margin >= panel.height) {
         top = rect.top - gap - panel.height;
       }
     }
-    left = Math.max(margin, Math.min(left, width - panel.width - margin));
-    top = Math.max(margin, Math.min(top, height - panel.height - margin));
+    left = Math.max(viewportLeft + margin, Math.min(left, viewportRight - panel.width - margin));
+    top = Math.max(viewportTop + margin, Math.min(top, viewportBottom - panel.height - margin));
     card.style.left = `${Math.round(left)}px`;
     card.style.top = `${Math.round(top)}px`;
     if (!rect) { spotlight.classList.add('hidden'); return; }
-    let highlightLeft = Math.max(margin, rect.left - 7);
-    let highlightTop = Math.max(margin, rect.top - 7);
-    let highlightRight = Math.min(width - margin, rect.right + 7);
-    let highlightBottom = Math.min(height - margin, rect.bottom + 7);
+    let highlightLeft = Math.max(viewportLeft + margin, rect.left - 7);
+    let highlightTop = Math.max(viewportTop + margin, rect.top - 7);
+    let highlightRight = Math.min(viewportRight - margin, rect.right + 7);
+    let highlightBottom = Math.min(viewportBottom - margin, rect.bottom + 7);
     // A tall terminal can extend under a bottom sheet: keep its heading illuminated above it.
     if (left < highlightRight && left + panel.width > highlightLeft && top > highlightTop && top < highlightBottom) {
       highlightBottom = top - gap;
@@ -119,7 +127,17 @@ export function createTutorial({ onComplete, onClose } = {}) {
 
   function queuePosition() {
     if (!opened || frame) return;
-    frame = window.requestAnimationFrame(() => { frame = 0; position(); });
+    frame = window.requestAnimationFrame(() => {
+      frame = 0;
+      const scroll = refreshTarget;
+      refreshTarget = false;
+      position({ scroll });
+    });
+  }
+
+  function viewportChanged() {
+    refreshTarget = true;
+    queuePosition();
   }
 
   function render() {
@@ -216,9 +234,10 @@ export function createTutorial({ onComplete, onClose } = {}) {
     backdrop.dataset.open = 'true';
     card.onclick = click;
     document.addEventListener('keydown', keys, true);
-    window.addEventListener('resize', queuePosition);
+    window.addEventListener('resize', viewportChanged);
     window.addEventListener('scroll', queuePosition, { passive: true });
-    window.visualViewport?.addEventListener('resize', queuePosition);
+    window.visualViewport?.addEventListener('resize', viewportChanged);
+    window.visualViewport?.addEventListener('scroll', queuePosition);
     render();
     card.focus({ preventScroll: true });
   }
@@ -230,10 +249,12 @@ export function createTutorial({ onComplete, onClose } = {}) {
     delete backdrop.dataset.open;
     card.onclick = null;
     document.removeEventListener('keydown', keys, true);
-    window.removeEventListener('resize', queuePosition);
+    window.removeEventListener('resize', viewportChanged);
     window.removeEventListener('scroll', queuePosition);
-    window.visualViewport?.removeEventListener('resize', queuePosition);
+    window.visualViewport?.removeEventListener('resize', viewportChanged);
+    window.visualViewport?.removeEventListener('scroll', queuePosition);
     if (frame) { window.cancelAnimationFrame(frame); frame = 0; }
+    refreshTarget = false;
     // Restore the value owned by this tour rather than replacing the page's prior scroll setting.
     document.body.style.overflow = previousOverflow;
     const focus = previousFocus?.isConnected && previousFocus.getClientRects().length ? previousFocus : document.querySelector('#start-mission');

@@ -202,7 +202,7 @@ function renderGame() {
     '<article class="decision-card" tabindex="-1"><div class="decision-illustration" aria-hidden="true">' + renderPropIcon(presentation.clue.icon) + '</div><div class="eyebrow">YOUR CALL</div><h2>' + escape(mission.decision.title) + '</h2><p>' + escape(mission.decision.context) + '</p><div class="decision-options">' + mission.decision.options.map(option=>'<button class="decision-option" data-decision="' + escape(option.id) + '" data-testid="decision-' + escape(option.id) + '" ' + (!session.started?'disabled':'') + '>' + escape(option.label) + '</button>').join('') + '</div><p id="decision-feedback" role="status"></p></article>' +
     '<article class="field-note"><div class="eyebrow">THIS SKILL GOES PLACES</div><p>' + escape(mission.realWorld) + '</p></article></div>' +
     '<div class="terminal-column"><section class="terminal-window" tabindex="-1" aria-label="Your training terminal"><div class="field-toolbar"><div><span class="field-toolbar-label">YOUR NEXT MOVE</span><strong id="current-objective" data-testid="current-objective"></strong><small id="current-objective-detail"></small></div><div class="field-toolbar-actions"><button type="button" id="jump-clues" data-testid="jump-clues">Clues</button><button type="button" id="jump-patch" data-testid="jump-patch">Patch</button><button type="button" id="jump-decision" data-testid="jump-decision">Make call</button></div></div><div class="terminal-header"><div class="terminal-dots"><i></i><i></i><i></i></div><span class="terminal-label">PATCH’S FIELD TERMINAL</span><div class="terminal-tools"><button id="clear-terminal" aria-label="Clear terminal display">Clear</button></div></div>' +
-    '<div id="terminal-output" class="terminal-output" role="log" aria-live="polite" aria-label="Terminal output"></div><form id="terminal-form" class="terminal-form" autocomplete="off"><label class="terminal-prompt" for="terminal-input">trainee@trail:' + escape(session.shell.cwd.replace('/home/trainee','~')) + '$</label><input id="terminal-input" data-testid="terminal-input" aria-label="Type a command" placeholder="Your next move…" spellcheck="false" autocapitalize="off" autocomplete="off" ' + (!session.started?'disabled':'') + '><button class="run-button" data-testid="run-command" type="submit" aria-label="Run command" ' + (!session.started?'disabled':'') + '>↵</button></form><div class="terminal-footer"><span>↑ ↓ history · Tab autocomplete · type help</span><span>Local simulation</span></div></section>' +
+    '<div id="terminal-output" class="terminal-output" role="log" aria-live="polite" aria-label="Terminal output"></div><form id="terminal-form" class="terminal-form" autocomplete="off"><label class="terminal-prompt" for="terminal-input">trainee@trail:' + escape(session.shell.cwd.replace('/home/trainee','~')) + '$</label><input id="terminal-input" data-testid="terminal-input" aria-label="Type a command" placeholder="Your next move…" spellcheck="false" autocapitalize="off" autocomplete="off" ' + (!session.started?'disabled':'') + '><button class="run-button" data-testid="run-command" type="submit" aria-label="Run command" ' + (!session.started?'disabled':'') + '>↵</button></form>' + terminalTypingTools() + '<div class="terminal-footer"><span>↑ ↓ history · Tab autocomplete · type help</span><span>Local simulation</span></div></section>' +
     '<div class="command-guide"><span>TOOLS FOR THIS STOP</span><div class="command-chips">' + commandNames(mission).map(command=>'<button class="command-chip" data-command="' + escape(command) + '">' + escape(command) + '</button>').join('') + '</div><div class="command-explainer" id="command-explainer" role="status"><strong>Every tool has a job.</strong><p>Pick a command to see what it does. Nothing runs until you press Enter.</p></div></div>' +
     '<article class="hint-card hint-companion" tabindex="-1" data-emotion="' + (session.hints?'hint':'idle') + '"><div class="hint-heading"><div><div class="eyebrow">COMPANION CHANNEL / PATCH</div><strong>Your very curious field buddy.</strong></div><span class="companion-online">● ONLINE</span></div>' +
     '<div class="hint-stage"><button type="button" class="patch-portrait companion-portrait" id="patch-chat" data-testid="patch-chat" aria-label="Check in with Patch" style="' + portraitStyle('PATCH') + '"><span class="character-signal" aria-hidden="true"></span></button><p class="patch-speech" id="hint-text" role="status">' + escape(hintText()) + '</p></div>' +
@@ -223,6 +223,13 @@ function renderGame() {
   $('#tour-replay').onclick=()=>{if(!busy)tutorial.open();};
   $('#terminal-form').onsubmit=event=>{event.preventDefault();runCommand();};
   $('#terminal-input').onkeydown=terminalKeys;
+  $$('[data-terminal-key]').forEach(button=>button.onclick=()=>{
+    if(!session.started||busy||tutorial.isOpen())return;
+    const input=$('#terminal-input');
+    terminalKeys({key:button.dataset.terminalKey,target:input,preventDefault(){}});
+    input.focus({preventScroll:true});
+    if(window.innerWidth<=900)revealTerminalInput();
+  });
   $('#clear-terminal').onclick=()=>{$('#terminal-output').replaceChildren();terminalLine('A clear view. Your mission evidence is still here.','system');};
   $$('[data-command]').forEach(button=>button.onclick=()=>{
     const command=button.dataset.command, detail=describeCommand(command);
@@ -250,9 +257,10 @@ function jumpToField(target) {
   const regions={scene:'.mission-scene',objectives:'.objectives-card',terminal:'.terminal-window',patch:'.hint-companion',decision:'.decision-card',reflection:'.mission-actions'};
   const region=$(regions[target]);if(!region)return;
   if(target!=='terminal')$('#terminal-input')?.blur();
-  region.scrollIntoView({block:'start',behavior:document.body.dataset.motion==='off'?'instant':'smooth'});
   const focus=target==='terminal'&&session.started?$('#terminal-input'):target==='reflection'?$('#debrief'):region;
   focus.focus({preventScroll:true});
+  if(target==='terminal'&&session.started&&window.innerWidth<=900)revealTerminalInput({center:true});
+  else region.scrollIntoView({block:'start',behavior:document.body.dataset.motion==='off'?'instant':'smooth'});
   $$('[data-target]').forEach(button=>{
     if(button.dataset.target===target)button.setAttribute('aria-current','location');else button.removeAttribute('aria-current');
   });
@@ -275,6 +283,20 @@ function observeField() {
 function syncKeyboardState() {
   const typing=document.activeElement===$('#terminal-input');
   document.body.dataset.keyboard=typing&&window.visualViewport&&window.visualViewport.height<window.innerHeight*.78?'true':'false';
+  if(typing&&window.innerWidth<=900)revealTerminalInput();
+}
+function revealTerminalInput({center=false}={}) {
+  const input=$('#terminal-input');if(!input)return;
+  const viewport=window.visualViewport;
+  const top=(viewport?.offsetTop||0)+14;
+  let bottom=(viewport?.offsetTop||0)+(viewport?.height||window.innerHeight)-14;
+  const dock=$('.mobile-field-nav');
+  if(dock?.getClientRects().length)bottom=Math.min(bottom,dock.getBoundingClientRect().top-14);
+  const box=input.getBoundingClientRect();
+  if(bottom<=top||(!center&&box.top>=top&&box.bottom<=bottom))return;
+  // Keep the command itself visible when the terminal is taller than a phone screen.
+  const destination=window.scrollY+box.top+box.height/2-(top+bottom)/2;
+  window.scrollTo({top:Math.max(0,destination),behavior:center&&document.body.dataset.motion!=='off'?'smooth':'instant'});
 }
 function syncHintTarget() {
   const target=getNextObjective(activeMission(),session.tasks)?.objective.id||null;
@@ -291,6 +313,12 @@ function hintText() {
 function commandNames(mission) {
   return [...new Set(mission.solutions.map(command => command.trim().split(/\s+/)[0]))].slice(0,6).concat('help');
 }
+function terminalTypingTools() {
+  const controls=[['ArrowUp','previous','↑ Previous','Previous command'],['ArrowDown','next','↓ Next','Next command'],['Tab','complete','⇥ Complete','Complete command or filename']];
+  return '<div class="terminal-shortcuts" role="group" aria-label="Command editing tools">'+controls.map(([key,id,label,description])=>
+    '<button type="button" data-terminal-key="'+key+'" data-testid="terminal-'+id+'" aria-label="'+description+'" '+(!session.started?'disabled':'')+'>'+label+'</button>'
+  ).join('')+'</div>';
+}
 function objectivesHtml() {
   return activeMission().objectives.map((objective,index) => '<div class="objective ' + (session.tasks[index]?'done':'') + '" data-testid="objective-' + index + '" data-complete="' + !!session.tasks[index] + '"><span class="objective-check">' + (session.tasks[index]?'✓':String(index+1).padStart(2,'0')) + '</span><div><strong>' + escape(objective.label) + '</strong><small>' + escape(objective.detail) + '</small></div></div>').join('');
 }
@@ -299,6 +327,7 @@ function beginMission() {
   session.started = true; tickAt = performance.now(); persist();
   $('.ready-banner').classList.add('hidden');
   $('#terminal-input').disabled = false; $('.run-button').disabled = false;
+  $$('[data-terminal-key]').forEach(button=>button.disabled=false);
   $$('[data-decision]').forEach(button => button.disabled = false);
   terminalLine('Patch is awake. Let’s figure this out together. Type help if you need your toolkit.','success');
   wakePatch('thinking', 'Field terminal awake. Start with one small question.');

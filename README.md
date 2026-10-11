@@ -29,9 +29,10 @@ The development server listens on port **4173**. The application is static HTML,
 npm run check
 npm test
 npm run test:browser
+npm run test:mobile
 ```
 
-The browser checks need Chromium. They use `/usr/bin/chromium` when available; otherwise install Playwright’s browser with `npx playwright install chromium`. Set `CHROMIUM_PATH` to use another Chromium executable. Start the development server before running the browser checks; `TRAILS_URL` can select another address.
+The browser checks need Chromium. They use `/usr/bin/chromium` when available; otherwise install Playwright’s browser with `npx playwright install chromium`. Set `CHROMIUM_PATH` to use another Chromium executable. Start the development server before running the browser checks; `TRAILS_URL` can select another address. The mobile checks exercise the story, tour, terminal, decisions, reflections, and journey backups on small portrait, landscape, and tablet screens.
 
 ## Your journey stays yours
 
