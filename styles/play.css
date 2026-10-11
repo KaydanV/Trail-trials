@@ -119,7 +119,7 @@
 .practice-banner strong { display: block; color: #f3d698; font: 700 18px/1.3 var(--display); }
 .practice-banner p { margin: 5px 0 0; color: #c5d8ce; font-size: 11px; line-height: 1.65; }
 .practice-banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-shrink: 0; }
-.practice-action {
+.button.practice-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -135,8 +135,8 @@
   font-weight: 750;
   text-decoration: none;
 }
-.practice-action:hover { background: #e7efcf; border-color: #658061; }
-.practice-action:disabled { color: #6c775d; background: #e7e7d1; border-color: #b5bca0; }
+.button.practice-action:hover { background: #e7efcf; border-color: #658061; }
+.button.practice-action:disabled { color: #6c775d; background: #e7e7d1; border-color: #b5bca0; }
 .practice-entry {
   display: inline-flex;
   align-items: center;
