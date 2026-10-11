@@ -29,7 +29,7 @@ function validProgress() {
     ...createProgress(missions), completed: ['arrival'], currentMission: 'archive',
     notes: { arrival: 'I checked who and where I was before working.' },
     scores: { arrival: { stars: 3, hints: 0, commands: 2, seconds: 12.5 } },
-    sessions: { arrival: session() }, settings: { motion: false, practice: true }
+    sessions: { arrival: session() }, settings: { motion: false, practice: true, tutorialSeen: false }
   };
 }
 
@@ -41,7 +41,7 @@ test('new profiles and normalized sparse profiles have independent defaults', ()
   assert.equal(second.version, 5);
   assert.equal(second.currentMission, 'arrival');
   assert.deepEqual(second.completed, []);
-  assert.deepEqual(second.settings, { motion: true, practice: true });
+  assert.deepEqual(second.settings, { motion: true, practice: true, tutorialSeen: false });
   assert.match(second.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
 });
 
@@ -73,6 +73,35 @@ test('three separate slots round-trip notes, scores, settings and mission sessio
   saves.remove(2);
   assert.equal(saves.read(2), null);
   assert.deepEqual(saves.read(1), first);
+});
+
+test('older V5 settings restore the tutorial without losing existing progress', () => {
+  const original = validProgress();
+  delete original.settings.tutorialSeen;
+  const storage = memoryStorage({ [key(1)]: JSON.stringify(original) });
+  const saves = createStorage(storage, missions);
+  const restored = saves.read(1);
+  assert.equal(restored.settings.tutorialSeen, false);
+  assert.deepEqual(restored, { ...original, settings: { ...original.settings, tutorialSeen: false } });
+  const imported = saves.import(2, JSON.stringify(original));
+  assert.deepEqual({ ...imported, updatedAt: original.updatedAt }, restored);
+  assert.equal(JSON.parse(storage.values.get(key(1))).settings.tutorialSeen, undefined);
+});
+
+test('completed or explicitly skipped tutorial stays remembered across save and export', () => {
+  const saves = createStorage(memoryStorage(), missions);
+  const progress = validProgress();
+  progress.settings.tutorialSeen = true;
+  const saved = saves.write(1, progress);
+  assert.equal(saves.read(1).settings.tutorialSeen, true);
+  const restored = saves.import(3, saves.export(1));
+  assert.equal(restored.settings.tutorialSeen, true);
+  assert.deepEqual({ ...restored, updatedAt: saved.updatedAt }, saved);
+  for (const invalid of ['true', 1, null, [], {}]) {
+    progress.settings.tutorialSeen = invalid;
+    assert.throws(() => saves.import(1, JSON.stringify(progress)), code('INVALID_SAVE'));
+    assert.equal(saves.read(1).settings.tutorialSeen, true);
+  }
 });
 
 test('slot APIs strictly reject out-of-range and noninteger slot values', () => {
@@ -223,12 +252,14 @@ test('legacy migration retains source, notes and XP without granting new curricu
   assert.deepEqual(saves.migrateLegacy(), { migrated: [1], warnings: [] });
   const profile = saves.read(1);
   assert.equal(profile.migrationNotice, true);
+  assert.equal(profile.settings.tutorialSeen, false);
   assert.deepEqual(profile.completed, []);
   assert.equal(profile.currentMission, 'arrival');
   assert.deepEqual(profile.legacyProgress, { completed: 2, xp: 260, notes: { evidence: 'Read the file before acting.' } });
   assert.equal(storage.values.get('terminal-trails-v2-slot-1'), legacy);
   assert.deepEqual(saves.migrateLegacy(), { migrated: [], warnings: [] });
   const imported = saves.import(2, legacy);
+  assert.equal(imported.settings.tutorialSeen, false);
   assert.deepEqual(imported.legacyProgress, profile.legacyProgress);
   assert.deepEqual(imported.completed, []);
   assert.equal(saves.import(3, saves.export(1)).migrationNotice, true);

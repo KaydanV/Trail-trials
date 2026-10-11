@@ -2,6 +2,10 @@
 
 We need to make this feel like a game people want to come back to. Better colours, stronger scenes, a clear story, and commands that actually do something in the situation.
 
+Our north star is an expedition with characters, not a page of exercises. Keep the homepage picture and caption. Give the title some punch, use warm and cool colours together, and show what the story is talking about. If Patch speaks, we see Patch. If the owl prints a clue or the squirrel offers a breadcrumb, that should be in the picture. Patch should feel like a companion you can check in with, and the world should acknowledge evidence you actually found. Follow `DESIGN_GUIDE.md` for the visual scheme.
+
+Don’t rush new players straight into commands. Patch’s six-step tour explains the story, checklist, terminal, hints, decisions, and trail progression. Beginner tools explain what they do, and tutorial examples leave the real mission alone. Players can take their time, skip the tour, or replay it from the mission.
+
 Hike Trail is our priority. The first stops should be easy, a bit fictional, and a bit silly. As you move through the valley, the tasks should get more connected and closer to real work. The player should understand the skills because they used them to solve a problem, not because we put a textbook in front of them.
 
 Office and Night Shift stay visible so people can see where the journey is going. We finish and test the foundation first. Then Office gets everyday workplace tasks; Night Shift gets realistic investigations and time-sensitive priorities. We’ll decide the final difficulty selection and progression once the whole experience exists.

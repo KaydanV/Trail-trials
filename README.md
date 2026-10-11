@@ -6,7 +6,7 @@ We’re building the foundation first. Hike Trail takes you from helping a sligh
 
 ## What’s playable
 
-- **Hike Trail:** 24 missions across four connected story acts, with evidence-based terminal objectives, interactive decisions, animated story scenes, and short debriefs.
+- **Hike Trail:** 24 missions across four connected story acts, with illustrated locations, speaking Nova and Patch portraits, evidence-based terminal objectives, interactive decisions, animated story scenes, and short debriefs.
 - **The Office:** visible and locked. Planned workplace situations; implementation comes after the foundation is refined and tested.
 - **The Night Shift:** visible and locked. Planned realistic operations and time-sensitive tasks; implementation comes later.
 
@@ -41,12 +41,18 @@ V4 progress is preserved separately when migrated. The expanded foundation start
 
 Explore mode is untimed by default. The optional challenge mode records active time without stopping your mission. Story animation respects both the in-game setting and the device’s reduced-motion preference. Hints affect stars, never whether a completed mission counts.
 
+Patch gives each journey a six-step guided introduction to the scene, objectives, terminal, hints, decisions, and progression. Its command previews are separate from the mission, and learning time pauses while the guide is open. Replay it whenever you like with **Show me around**. Command buttons explain their purpose before you run them; tapping Patch offers encouragement without using a hint.
+
+The visual direction uses expressive display lettering, deep forest and petrol atmosphere, warm amber actions, parchment evidence, and cyan terminal signals. Keep the world, characters, clues, and learning connected as we add more content. See [the design guide](docs/DESIGN_GUIDE.md) for the colours, fonts, scene composition, and interaction rules.
+
 ## Project layout
 
 - `src/app.js`: adventure interface, story playback, progression, and debriefs.
 - `src/curriculum.js`: mission story, fixtures, objectives, decisions, and skill map.
 - `src/engine.js`: isolated teaching shell with structured evidence checks.
 - `src/storage.js`: validated saves, backups, and V4 migration.
+- `src/presentation.js`: scene and character mapping for every story frame, with illustrated evidence props.
+- `src/tutorial.js` and `src/tools.js`: Patch’s guided introduction and beginner command explanations.
 - `styles.css` and `assets/`: visual system and artwork.
 - `tests/`: shell, save-system, curriculum, and browser regression checks.
 - `docs/v4-reference.html`: the uploaded readable V4 source, retained as a development reference.

@@ -1,6 +1,9 @@
 import {missions, acts, skillGuide} from './curriculum.js';
 import {createShell, execute, matchesObjective} from './engine.js';
 import {createProgress, createStorage} from './storage.js';
+import {getPresentation, renderPropIcon} from './presentation.js';
+import {createTutorial} from './tutorial.js';
+import {describeCommand} from './tools.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -20,6 +23,13 @@ if (current < 0) current = 0;
 let session = null, historyIndex = 0, busy = false, dialogReturn = null, sceneIndex = 0, previewScene = false;
 let tickAt = performance.now();
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const tutorial = createTutorial({
+  onComplete() { profile.settings.tutorialSeen = true; persist(); },
+  onClose() {
+    tickAt = performance.now();
+    document.activeElement?.scrollIntoView({block:'nearest', behavior:'instant'});
+  }
+});
 
 function readProfile(number) {
   try { return storage.read(number) || createProgress(missions); }
@@ -60,7 +70,7 @@ function toast(text) {
   toast.timer = setTimeout(() => node.classList.remove('show'), 4500);
 }
 function header() {
-  return '<header class="site-header"><button class="brand" data-action="home" aria-label="Terminal Trails home"><img class="brand-icon" src="assets/trail-mark.svg" alt=""><span><strong class="brand-name">TERMINAL TRAILS</strong><small class="brand-sub">THE SIGNAL ACADEMY</small></span></button><nav class="header-nav" aria-label="Main navigation"><button class="nav-button ' + (view === 'home' ? 'active' : '') + '" data-action="home">The adventure</button><button class="nav-button" data-action="map">Your trail</button><button class="nav-button" data-action="notebook" data-testid="notebook">Field notebook</button></nav><div class="header-status"><span class="chip">✦ ' + xp() + ' XP</span><button class="icon-button" data-action="settings" data-testid="settings" aria-label="Save and settings">⚙</button></div></header>';
+  return '<header class="site-header"><button class="brand" data-action="home" aria-label="Terminal Trails home"><img class="brand-icon" src="assets/trail-mark.svg" alt=""><span><strong class="brand-name"><span class="brand-terminal">TERMINAL</span><span class="brand-trails">TRAILS</span></strong><small class="brand-sub">THE SIGNAL ACADEMY</small></span></button><nav class="header-nav" aria-label="Main navigation"><button class="nav-button ' + (view === 'home' ? 'active' : '') + '" data-action="home">The adventure</button><button class="nav-button" data-action="map">Your trail</button><button class="nav-button" data-action="notebook" data-testid="notebook">Field notebook</button></nav><div class="header-status"><span class="chip">✦ ' + xp() + ' XP</span><button class="icon-button" data-action="settings" data-testid="settings" aria-label="Save and settings">⚙</button></div></header>';
 }
 function footer() {
   return '<footer class="site-footer"><span>⌁ TERMINAL TRAILS</span><span>A little adventure. A lot of real skills.</span><span>Saved in this browser · ' + (storage.available ? 'Local save active' : 'Temporary session — export a backup') + '</span></footer>';
@@ -73,12 +83,12 @@ function worldCard(name, number, description, tags, type) {
 }
 function renderHome() {
   view = 'home'; session = null;
-  $('#app').innerHTML = header() + '<main id="main" class="home-view" tabindex="-1"><section class="hero"><div class="hero-copy"><div class="eyebrow"><span class="live-dot"></span> CYBERSECURITY, WITH A LITTLE ADVENTURE</div><h1 class="hero-title">Big adventure.<br>Real skills.<br><em>Your first trail.</em></h1><p class="hero-description">A curious robot. A mountain full of mysteries. And you, figuring it all out one command at a time. This is where your cybersecurity story starts.</p><div class="hero-actions"><button class="button primary" data-action="start" data-testid="start-journey">' + (completedCount() ? 'Continue your adventure' : 'Let’s hit the trail') + ' <span>→</span></button><button class="button secondary" data-action="preview">▷ Meet the story</button></div><div class="hero-proof"><span>✧ Learn by doing</span><span>⌘ No experience needed</span><span>♡ Room to make mistakes</span></div></div><div class="hero-art" role="img" aria-label="Nova and Patch overlooking an alpine lake and distant signal tower"><div class="hero-art-overlay"></div><div class="floating-badge"><span>✦</span> Your next chapter starts here.</div><div class="hero-caption"><span>01 / HIKE TRAIL</span><strong>Every expert starts somewhere.</strong></div></div></section><section class="home-section"><div class="section-heading"><div><div class="eyebrow">CHOOSE YOUR JOURNEY</div><h2>A world worth figuring out.</h2></div><p>Start a little silly. Finish a lot more capable.<br>The trail comes first. Bigger challenges follow.</p></div><div class="world-grid">' + worldCard('Hike Trail','01','From finding Patch’s missing snacks to restoring the valley’s signal. Build your foundation through one connected adventure.','FOUNDATION · AVAILABLE NOW','available') + worldCard('The Office','02','The next chapter: teammates, suspicious emails, everyday systems, and decisions that matter at work.','WORKPLACE · PLANNED','locked') + worldCard('The Night Shift','03','Realistic investigations, changing priorities, and time-sensitive tasks when the rest of the world is asleep.','OPERATIONS · PLANNED','locked') + '</div></section><section class="home-section" id="journeys"><div class="section-heading"><div><div class="eyebrow">YOUR LITTLE CORNER OF THE WORLD</div><h2>Keep your adventure going.</h2></div><p>Three independent journeys. Pick one and make it yours.</p></div><div class="journey-grid">' + [1,2,3].map(number => {
+  $('#app').innerHTML = header() + '<main id="main" class="home-view" tabindex="-1"><section class="hero"><div class="hero-copy"><div class="eyebrow"><span class="live-dot"></span> CYBERSECURITY, WITH A LITTLE ADVENTURE</div><h1 class="hero-title">Big adventure.<br>Real skills.<br><em>Your first trail.</em></h1><p class="hero-description">A curious robot. A mountain full of mysteries. And you, figuring it all out one command at a time. This is where your cybersecurity story starts.</p><div class="hero-actions"><button class="button primary" data-action="start" data-testid="start-journey">' + (completedCount() ? 'Continue your adventure' : 'Let’s hit the trail') + ' <span>→</span></button><button class="button secondary" data-action="preview">▷ Meet the story</button></div><div class="hero-proof"><span>✧ Learn by doing</span><span>⌘ No experience needed</span><span>♡ Room to make mistakes</span></div></div><div class="hero-art" role="img" aria-label="Nova and Patch overlooking an alpine lake and distant signal tower"><div class="hero-art-overlay"></div><div class="floating-badge"><span>✦</span> Your next chapter starts here.</div><div class="hero-caption"><span>01 / HIKE TRAIL</span><strong>Every expert starts somewhere.</strong></div></div></section><section class="home-section worlds-section"><div class="section-heading"><div><div class="eyebrow">CHOOSE YOUR JOURNEY</div><h2>A world worth figuring out.</h2></div><p>Start a little silly. Finish a lot more capable.<br>The trail comes first. Bigger challenges follow.</p></div><div class="world-grid">' + worldCard('Hike Trail','01','From finding Patch’s missing snacks to restoring the valley’s signal. Build your foundation through one connected adventure.','FOUNDATION · AVAILABLE NOW','available') + worldCard('The Office','02','The next chapter: teammates, suspicious emails, everyday systems, and decisions that matter at work.','WORKPLACE · PLANNED','locked') + worldCard('The Night Shift','03','Realistic investigations, changing priorities, and time-sensitive tasks when the rest of the world is asleep.','OPERATIONS · PLANNED','locked') + '</div></section><section class="home-section journeys-section" id="journeys"><div class="section-heading"><div><div class="eyebrow">YOUR LITTLE CORNER OF THE WORLD</div><h2>Keep your adventure going.</h2></div><p>Three independent journeys. Pick one and make it yours.</p></div><div class="journey-grid">' + [1,2,3].map(number => {
     let data = null;
     try { data = storage.read(number); } catch { corruptSlots.add(number); }
     const count = data?.completed.length || 0;
     return '<button class="journey-card ' + (slot === number ? 'selected' : '') + '" data-action="slot" data-slot="' + number + '" data-testid="slot-' + number + '" aria-pressed="' + (slot === number) + '"><div class="journey-number">JOURNEY 0' + number + '<span>' + (slot === number ? 'SELECTED' : corruptSlots.has(number) ? 'SAVE NEEDS ATTENTION' : count ? 'IN PROGRESS' : 'A FRESH START') + '</span></div><h3>' + (count ? 'Your story is waiting.' : 'An adventure of your own.') + '</h3><p>' + (data?.currentMission ? escape(missions.find(m => m.id === data.currentMission)?.title || 'Ready for the trail') : 'Meet Nova. Wake up Patch. Find your feet.') + '</p><div class="progress-bar"><span style="width:' + count / missions.length * 100 + '%"></span></div><div class="journey-meta"><span>' + count + ' / ' + missions.length + ' missions</span><span>→</span></div></button>';
-  }).join('') + '</div>' + (!storage.available ? '<p class="storage-notice" role="status">Browser storage is unavailable. You can still play, but export your progress before closing this tab.</p>' : '') + (profile.migrationNotice ? '<p class="storage-notice">Your V4 journey is preserved. The new foundation has new challenges, so it starts fresh. Your earlier reflections are in the notebook.</p>' : '') + '</section><section class="home-section curriculum-preview"><div class="section-heading"><div><div class="eyebrow">24 STOPS. ONE CONTINUOUS STORY.</div><h2>Small steps. Proper foundations.</h2></div><button class="button secondary" data-action="map">See the full trail →</button></div><div class="act-grid">' + acts.map((act, index) => '<article class="act-card"><span class="act-number">0' + (index + 1) + '</span><div class="eyebrow">ACT ' + (index + 1) + ' · 6 MISSIONS</div><h3>' + escape(act.title) + '</h3><p>' + escape(act.description || act.subtitle) + '</p></article>').join('') + '</div><div class="foundation-status" data-testid="foundation-status">' + (allComplete() ? 'Foundation complete. Every Hike Trail mission is cleared. Office and Night Shift remain in development.' : 'Your foundation: ' + completedCount() + ' of ' + missions.length + ' missions cleared. Office and Night Shift stay locked.') + '</div></section></main>' + footer();
+  }).join('') + '</div>' + (!storage.available ? '<p class="storage-notice" role="status">Browser storage is unavailable. You can still play, but export your progress before closing this tab.</p>' : '') + (profile.migrationNotice ? '<p class="storage-notice">Your V4 journey is preserved. The new foundation has new challenges, so it starts fresh. Your earlier reflections are in the notebook.</p>' : '') + '</section><section class="home-section curriculum-preview acts-section"><div class="section-heading"><div><div class="eyebrow">24 STOPS. ONE CONTINUOUS STORY.</div><h2>Small steps. Proper foundations.</h2></div><button class="button secondary" data-action="map">See the full trail →</button></div><div class="act-grid">' + acts.map((act, index) => '<article class="act-card"><span class="act-number">0' + (index + 1) + '</span><div class="eyebrow">ACT ' + (index + 1) + ' · 6 MISSIONS</div><h3>' + escape(act.title) + '</h3><p>' + escape(act.description || act.subtitle) + '</p></article>').join('') + '</div><div class="foundation-status" data-testid="foundation-status">' + (allComplete() ? 'Foundation complete. Every Hike Trail mission is cleared. Office and Night Shift remain in development.' : 'Your foundation: ' + completedCount() + ' of ' + missions.length + ' missions cleared. Office and Night Shift stay locked.') + '</div></section></main>' + footer();
   bindActions(); applySettings();
 }
 function bindActions() {
@@ -101,7 +111,7 @@ function selectSlot(number) {
 function goHome() {
   if (busy) return toast('Patch is finishing your command. One moment.');
   if (session) persist();
-  closeDialog(); closeScene(false); renderHome(); window.scrollTo({top:0,behavior:'instant'});
+  tutorial.close(); closeDialog(); closeScene(false); renderHome(); window.scrollTo({top:0,behavior:'instant'});
 }
 function startJourney() {
   if (corruptSlots.has(slot)) { settings(); toast('Import a backup or reset this corrupted slot before starting.'); return; }
@@ -118,32 +128,77 @@ function loadMission(index) {
   view = 'game'; busy = false;
   persist(); renderGame(); window.scrollTo({top:0,behavior:'instant'});
   if (!session.started) showScene(false);
+  else if (!profile.settings.tutorialSeen) tutorial.open();
+}
+function atlasStyle(scene) {
+  return 'background-image:url(' + escape(scene.asset) + ');background-size:300% 200%;background-position:' + escape(scene.position);
+}
+function portraitStyle(name) {
+  return 'background-image:url(assets/characters/companions.webp);background-size:200% 100%;background-position:' + (name === 'PATCH' ? '100% 50%' : '0% 50%');
+}
+function portrait(name, classes = 'character-portrait') {
+  return '<div class="' + classes + '" data-speaker="' + escape(name) + '" role="img" aria-label="' + (name === 'PATCH' ? 'Patch, your robot companion' : 'Nova, your expedition guide') + '" style="' + portraitStyle(name) + '"><span class="character-signal" aria-hidden="true"></span></div>';
+}
+function sceneMarkup(mission) {
+  const presentation = getPresentation(mission, 0), scene = presentation.scene;
+  return '<figure class="mission-scene" data-scene="' + escape(scene.id) + '" data-palette="' + escape(scene.palette) + '" data-state="exploring">' +
+    '<div class="scene-viewport" role="img" aria-label="' + escape(scene.alt) + '" style="' + atlasStyle(scene) + '"><div class="scene-weather" aria-hidden="true"></div><div class="mission-prop" aria-hidden="true">' + renderPropIcon(scene.prop) + '</div><span class="scene-coordinate">FIELD FEED / ' + String(current+1).padStart(2,'0') + '</span></div>' +
+    '<figcaption class="scene-caption"><span>' + escape(scene.label) + '</span><span id="scene-status" class="scene-state">Your next clue is waiting</span></figcaption></figure>';
 }
 function renderGame() {
-  const mission = missions[current], count = session.tasks.filter(Boolean).length;
-  $('#app').innerHTML = header() + '<main id="main" class="game-view" tabindex="-1"><div class="game-topline"><button class="back-link" data-action="home" data-testid="home">← Back to the adventure</button><span class="mission-counter">HIKE TRAIL / STOP ' + String(current + 1).padStart(2,'0') + ' OF ' + missions.length + '</span><span class="xp-badge">✦ ' + xp() + ' XP</span></div><div class="expedition-layout"><aside class="trail-sidebar"><div class="trail-progress"><div class="eyebrow">YOUR EXPEDITION</div><h2>Hike Trail</h2><p>' + completedCount() + ' / ' + missions.length + ' stops cleared</p><div class="progress-bar"><span style="width:' + completedCount()/missions.length*100 + '%"></span></div></div><details class="trail-details" open><summary>Explore the trail <span>⌄</span></summary>' + acts.map((act, actIndex) => '<div class="act-heading">0' + (actIndex + 1) + ' / ' + escape(act.title) + '</div>' + missions.map((m,index) => m.act === actIndex ? '<button class="trail-node ' + (profile.completed.includes(m.id) ? 'completed ' : '') + (index === current ? 'active ' : '') + (index > unlockedIndex() ? 'locked' : '') + '" data-mission="' + index + '" ' + (index > unlockedIndex() ? 'disabled' : '') + ' aria-current="' + (index === current ? 'step' : 'false') + '"><span class="node-number">' + (profile.completed.includes(m.id) ? '✓' : String(index+1).padStart(2,'0')) + '</span><span>' + escape(m.title) + '</span>' + (index>unlockedIndex() ? '<span aria-label="Locked">⌁</span>' : '') + '</button>' : '').join('')).join('') + '</details><div class="sidebar-future"><span>⌁ The Office</span><span>⌁ The Night Shift</span><small>Build the foundation first.<br>These chapters are still in development.</small></div></aside><section class="mission-workspace"><section class="mission-banner"><div class="mission-eyebrow">ACT ' + (mission.act + 1) + ' · ' + escape(mission.location) + '</div><h1>' + escape(mission.title) + '</h1><p>' + escape(mission.summary) + '</p><div class="mission-meta"><span class="chip">' + escape(mission.difficulty) + '</span><span class="chip">◷ ' + escape(mission.estimate) + '</span><button class="chip replay-story" id="replay-story">▷ Replay story</button></div></section><div class="ready-banner ' + (session.started ? 'hidden' : '') + '"><div><strong>No rush. You’ve got this.</strong><p>Read your brief, then start when you’re ready. Your learning time begins with you.</p></div><button class="button primary" id="start-mission" data-testid="start-mission">Start mission →</button></div><div class="mission-grid"><div class="briefing-column"><article class="story-card"><div class="character-avatar" aria-hidden="true">N</div><div><div class="speaker">NOVA · YOUR FIELD GUIDE</div><p class="story-message">' + escape(mission.story[0]?.text || mission.summary) + '</p><div class="mission-skills">' + mission.skills.map(skill => '<span class="chip">' + escape(skill) + '</span>').join('') + '</div></div></article><article class="objectives-card"><div class="card-heading"><h2>Your mission</h2><span id="mission-progress" data-testid="mission-progress">' + count + ' / ' + mission.objectives.length + '</span></div><div id="objectives">' + objectivesHtml() + '</div></article><article class="decision-card"><div class="eyebrow">YOUR CALL</div><h2>' + escape(mission.decision.title) + '</h2><p>' + escape(mission.decision.context) + '</p><div class="decision-options">' + mission.decision.options.map(option => '<button class="decision-option" data-decision="' + escape(option.id) + '" data-testid="decision-' + escape(option.id) + '" ' + (!session.started ? 'disabled' : '') + '>' + escape(option.label) + '</button>').join('') + '</div><p id="decision-feedback" role="status"></p></article><article class="field-note"><div class="eyebrow">THIS SKILL GOES PLACES</div><p>' + escape(mission.realWorld) + '</p></article></div><div class="terminal-column"><section class="terminal-window" aria-label="Your training terminal"><div class="terminal-header"><div class="terminal-dots"><i></i><i></i><i></i></div><span class="terminal-label">PATCH’S FIELD TERMINAL</span><div class="terminal-tools"><button id="clear-terminal" aria-label="Clear terminal display">Clear</button></div></div><div id="terminal-output" class="terminal-output" role="log" aria-live="polite" aria-label="Terminal output"></div><form id="terminal-form" class="terminal-form" autocomplete="off"><label class="terminal-prompt" for="terminal-input">trainee@trail:' + escape(session.shell.cwd.replace('/home/trainee','~')) + '$</label><input id="terminal-input" data-testid="terminal-input" aria-label="Type a command" placeholder="Your next move…" spellcheck="false" autocapitalize="off" autocomplete="off" ' + (!session.started ? 'disabled' : '') + '><button class="run-button" data-testid="run-command" type="submit" aria-label="Run command" ' + (!session.started ? 'disabled' : '') + '>↵</button></form><div class="terminal-footer"><span>↑ ↓ history · Tab autocomplete · type help</span><span>Local simulation</span></div></section><div class="command-guide"><span>TOOLS FOR THIS STOP</span>' + commandNames(mission).map(command => '<button class="command-chip" data-command="' + escape(command) + '">' + escape(command) + '</button>').join('') + '</div><article class="hint-card"><div class="hint-heading"><span class="patch-face" aria-hidden="true">◉‿◉</span><div><div class="eyebrow">PATCH HAS YOUR BACK</div><strong>A nudge, whenever you need one.</strong></div></div><p id="hint-text">' + escape(session.hints ? mission.hints[Math.min(session.hints-1,mission.hints.length-1)] : 'Getting stuck is part of the trail. Ask me for a small clue, then a bigger one if you need it.') + '</p><div class="hint-actions"><button class="button secondary" id="hint-button">Ask Patch ' + (session.hints ? '(' + session.hints + ')' : '') + '</button><button class="button ghost" id="restart-mission">↻ Try this stop again</button></div></article><div class="mission-actions"><div><p class="mission-feedback" id="mission-feedback" role="status">' + (count === mission.objectives.length ? 'All evidence collected. Tell Nova what you found.' : 'Make the moves. Follow the clues. Then make your call.') + '</p><small id="session-timer">' + timingText() + '</small></div><button class="button primary" id="debrief" data-testid="debrief" ' + (count !== mission.objectives.length ? 'disabled' : '') + '>Finish & reflect →</button></div></div></div><div class="game-foundation-status" data-testid="foundation-status">' + (allComplete() ? 'Foundation complete · Office and Night Shift remain in development.' : completedCount() + '/' + missions.length + ' foundation missions cleared · Next worlds locked') + '</div></section></div></main>' + footer();
+  const mission = missions[current], count = session.tasks.filter(Boolean).length, presentation = getPresentation(mission,0);
+  $('#app').innerHTML = header() +
+    '<main id="main" class="game-view" tabindex="-1"><div class="game-topline"><button class="back-link" data-action="home" data-testid="home">← Back to the adventure</button><span class="mission-counter">HIKE TRAIL / STOP ' + String(current+1).padStart(2,'0') + ' OF ' + missions.length + '</span><span class="xp-badge">✦ ' + xp() + ' XP</span></div>' +
+    '<div class="expedition-layout"><aside class="trail-sidebar"><div class="trail-progress"><div class="eyebrow">YOUR EXPEDITION</div><h2>Hike Trail</h2><p>' + completedCount() + ' / ' + missions.length + ' stops cleared</p><div class="progress-bar"><span style="width:' + completedCount()/missions.length*100 + '%"></span></div></div>' +
+    '<details class="trail-details" open><summary>Explore the trail <span>⌄</span></summary>' + acts.map((act,actIndex) =>
+      '<div class="act-heading">0' + (actIndex+1) + ' / ' + escape(act.title) + '</div>' +
+      missions.map((m,index) => m.act === actIndex ?
+        '<button class="trail-node ' + (profile.completed.includes(m.id)?'completed ':'') + (index===current?'active ':'') + (index>unlockedIndex()?'locked':'') + '" data-mission="' + index + '" ' + (index>unlockedIndex()?'disabled':'') + ' aria-current="' + (index===current?'step':'false') + '"><span class="node-number">' + (profile.completed.includes(m.id)?'✓':String(index+1).padStart(2,'0')) + '</span><span>' + escape(m.title) + '</span>' + (index>unlockedIndex()?'<span aria-label="Locked">⌁</span>':'') + '</button>' : '').join('')).join('') +
+    '</details><div class="sidebar-future"><span>⌁ The Office</span><span>⌁ The Night Shift</span><small>Build the foundation first.<br>These chapters are still in development.</small></div></aside>' +
+    '<section class="mission-workspace"><section class="mission-banner scene-banner">' + sceneMarkup(mission) +
+    '<div class="mission-overview"><div class="mission-eyebrow">ACT ' + (mission.act+1) + ' · ' + escape(mission.location) + '</div><h1>' + escape(mission.title) + '</h1><p>' + escape(mission.summary) + '</p><div class="mission-meta"><span class="chip">' + escape(mission.difficulty) + '</span><span class="chip">◷ ' + escape(mission.estimate) + '</span><button class="chip replay-story" id="replay-story">▷ Replay story</button><button class="chip tour-replay" id="tour-replay" data-testid="tour-replay">⌘ Show me around</button></div><div class="scene-progress" aria-label="Mission stages"><span data-stage="clues">01 / Follow the clues</span><span data-stage="decision">02 / Make your call</span><span data-stage="reflection">03 / Make it stick</span></div></div></section>' +
+    '<div class="ready-banner ' + (session.started?'hidden':'') + '"><div><strong>No rush. You’ve got this.</strong><p>Nova has the brief. Patch has your back. Get comfortable, then wake up your field terminal.</p></div><button class="button primary" id="start-mission" data-testid="start-mission">Start mission →</button></div>' +
+    '<div class="mission-grid"><div class="briefing-column"><article class="story-card">' + portrait(presentation.speaker.name) +
+    '<div><div class="speaker">' + escape(presentation.speaker.name + ' · ' + presentation.speaker.role) + '</div><p class="story-message">' + escape(mission.story[0]?.text || mission.summary) + '</p><div class="mission-skills">' + mission.skills.map(skill=>'<span class="chip">' + escape(skill) + '</span>').join('') + '</div></div></article>' +
+    '<article class="objectives-card"><div class="card-heading"><h2>Your mission</h2><span id="mission-progress" data-testid="mission-progress">' + count + ' / ' + mission.objectives.length + '</span></div><div id="objectives">' + objectivesHtml() + '</div></article>' +
+    '<article class="decision-card"><div class="decision-illustration" aria-hidden="true">' + renderPropIcon(presentation.clue.icon) + '</div><div class="eyebrow">YOUR CALL</div><h2>' + escape(mission.decision.title) + '</h2><p>' + escape(mission.decision.context) + '</p><div class="decision-options">' + mission.decision.options.map(option=>'<button class="decision-option" data-decision="' + escape(option.id) + '" data-testid="decision-' + escape(option.id) + '" ' + (!session.started?'disabled':'') + '>' + escape(option.label) + '</button>').join('') + '</div><p id="decision-feedback" role="status"></p></article>' +
+    '<article class="field-note"><div class="eyebrow">THIS SKILL GOES PLACES</div><p>' + escape(mission.realWorld) + '</p></article></div>' +
+    '<div class="terminal-column"><section class="terminal-window" aria-label="Your training terminal"><div class="terminal-header"><div class="terminal-dots"><i></i><i></i><i></i></div><span class="terminal-label">PATCH’S FIELD TERMINAL</span><div class="terminal-tools"><button id="clear-terminal" aria-label="Clear terminal display">Clear</button></div></div>' +
+    '<div id="terminal-output" class="terminal-output" role="log" aria-live="polite" aria-label="Terminal output"></div><form id="terminal-form" class="terminal-form" autocomplete="off"><label class="terminal-prompt" for="terminal-input">trainee@trail:' + escape(session.shell.cwd.replace('/home/trainee','~')) + '$</label><input id="terminal-input" data-testid="terminal-input" aria-label="Type a command" placeholder="Your next move…" spellcheck="false" autocapitalize="off" autocomplete="off" ' + (!session.started?'disabled':'') + '><button class="run-button" data-testid="run-command" type="submit" aria-label="Run command" ' + (!session.started?'disabled':'') + '>↵</button></form><div class="terminal-footer"><span>↑ ↓ history · Tab autocomplete · type help</span><span>Local simulation</span></div></section>' +
+    '<div class="command-guide"><span>TOOLS FOR THIS STOP</span><div class="command-chips">' + commandNames(mission).map(command=>'<button class="command-chip" data-command="' + escape(command) + '">' + escape(command) + '</button>').join('') + '</div><div class="command-explainer" id="command-explainer" role="status"><strong>Every tool has a job.</strong><p>Pick a command to see what it does. Nothing runs until you press Enter.</p></div></div>' +
+    '<article class="hint-card hint-companion" data-emotion="' + (session.hints?'hint':'idle') + '"><div class="hint-heading"><div><div class="eyebrow">COMPANION CHANNEL / PATCH</div><strong>Your very curious field buddy.</strong></div><span class="companion-online">● ONLINE</span></div>' +
+    '<div class="hint-stage"><button type="button" class="patch-portrait companion-portrait" id="patch-chat" data-testid="patch-chat" aria-label="Check in with Patch" style="' + portraitStyle('PATCH') + '"><span class="character-signal" aria-hidden="true"></span></button><p class="patch-speech" id="hint-text" role="status">' + escape(session.hints?mission.hints[Math.min(session.hints-1,mission.hints.length-1)]:'Hey, trail buddy. I’m right here. Tap me for a check-in, or ask for a clue when you need one.') + '</p></div>' +
+    '<div class="hint-meter" aria-label="Three clue strengths"><span>Small nudge</span><span>Dig a little deeper</span><span>Show the route</span></div><div class="hint-actions"><button class="button secondary" id="hint-button">Ask Patch ' + (session.hints?'('+session.hints+')':'') + '</button><button class="button ghost" id="restart-mission">↻ Try this stop again</button></div><p class="patch-response" id="patch-response" role="status">Good questions are part of the adventure.</p></article>' +
+    '<div class="mission-actions"><div><p class="mission-feedback" id="mission-feedback" role="status">' + (count===mission.objectives.length?'All evidence collected. Tell Nova what you found.':'Make the moves. Follow the clues. Then make your call.') + '</p><small id="session-timer">' + timingText() + '</small></div><button class="button primary" id="debrief" data-testid="debrief" ' + (count!==mission.objectives.length?'disabled':'') + '>Finish & reflect →</button></div></div></div>' +
+    '<div class="game-foundation-status" data-testid="foundation-status">' + (allComplete()?'Foundation complete · Office and Night Shift remain in development.':completedCount()+'/'+missions.length+' foundation missions cleared · Next worlds locked') + '</div></section></div></main>' + footer();
   bindActions();
-  $$('[data-mission]').forEach(button => button.onclick = () => loadMission(Number(button.dataset.mission)));
-  $('#start-mission').onclick = beginMission;
-  $('#replay-story').onclick = () => showScene(false);
-  $('#terminal-form').onsubmit = event => { event.preventDefault(); runCommand(); };
-  $('#terminal-input').onkeydown = terminalKeys;
-  $('#clear-terminal').onclick = () => { $('#terminal-output').replaceChildren(); terminalLine('A clear view. Your mission evidence is still here.','system'); };
-  $$('[data-command]').forEach(button => button.onclick = () => {
-    if (!session.started) return toast('Start the mission when you’re ready.');
-    $('#terminal-input').value = button.dataset.command + (['pwd','whoami','help'].includes(button.dataset.command) ? '' : ' ');
+  $$('[data-mission]').forEach(button=>button.onclick=()=>loadMission(Number(button.dataset.mission)));
+  $('#start-mission').onclick=beginMission;
+  $('#replay-story').onclick=()=>showScene(false);
+  $('#tour-replay').onclick=()=>{if(!busy)tutorial.open();};
+  $('#terminal-form').onsubmit=event=>{event.preventDefault();runCommand();};
+  $('#terminal-input').onkeydown=terminalKeys;
+  $('#clear-terminal').onclick=()=>{$('#terminal-output').replaceChildren();terminalLine('A clear view. Your mission evidence is still here.','system');};
+  $$('[data-command]').forEach(button=>button.onclick=()=>{
+    const command=button.dataset.command, detail=describeCommand(command);
+    $('#command-explainer').innerHTML='<strong>' + escape(detail.title) + '</strong><p>' + escape(detail.text) + '</p><code>' + escape(detail.example) + '</code>';
+    if(!session.started)return;
+    $('#terminal-input').value=command+(['pwd','whoami','help'].includes(command)?'':' ');
     $('#terminal-input').focus();
   });
-  $$('[data-decision]').forEach(button => button.onclick = () => makeDecision(button.dataset.decision));
-  $('#hint-button').onclick = giveHint;
-  $('#restart-mission').onclick = restartMission;
-  $('#debrief').onclick = debrief;
+  $$('[data-decision]').forEach(button=>button.onclick=()=>makeDecision(button.dataset.decision));
+  $('#hint-button').onclick=giveHint;
+  $('#patch-chat').onclick=checkInWithPatch;
+  $('#restart-mission').onclick=restartMission;
+  $('#debrief').onclick=debrief;
   terminalLine('⌁ SIGNAL ACADEMY / FIELD SIMULATION','system');
-  terminalLine(session.started ? 'Welcome back. Your files and verified evidence are saved.' : 'The trail is ready. Start the mission to wake up your terminal.','system');
-  if (session.shell.history.length) terminalLine('Last moves:\n' + session.shell.history.slice(-5).join('\n'),'system');
+  terminalLine(session.started?'Welcome back. Your files and verified evidence are saved.':'The trail is ready. Start the mission to wake up your terminal.','system');
+  if(session.shell.history.length)terminalLine('Last moves:\n'+session.shell.history.slice(-5).join('\n'),'system');
   updateTasks();
-  if (window.innerWidth < 900) $('.trail-details').open = false;
+  updateHintMeter();
+  if(window.innerWidth<900)$('.trail-details').open=false;
 }
+
 function commandNames(mission) {
   return [...new Set(mission.solutions.map(command => command.trim().split(/\s+/)[0]))].slice(0,6).concat('help');
 }
@@ -151,12 +206,13 @@ function objectivesHtml() {
   return missions[current].objectives.map((objective,index) => '<div class="objective ' + (session.tasks[index]?'done':'') + '" data-testid="objective-' + index + '" data-complete="' + !!session.tasks[index] + '"><span class="objective-check">' + (session.tasks[index]?'✓':String(index+1).padStart(2,'0')) + '</span><div><strong>' + escape(objective.label) + '</strong><small>' + escape(objective.detail) + '</small></div></div>').join('');
 }
 function beginMission() {
-  if (session.started) return;
+  if (session.started || tutorial.isOpen()) return;
   session.started = true; tickAt = performance.now(); persist();
   $('.ready-banner').classList.add('hidden');
   $('#terminal-input').disabled = false; $('.run-button').disabled = false;
   $$('[data-decision]').forEach(button => button.disabled = false);
   terminalLine('Patch is awake. Let’s figure this out together. Type help if you need your toolkit.','success');
+  wakePatch('thinking', 'Field terminal awake. Start with one small question.');
   $('#terminal-input').focus();
 }
 function terminalLine(text,type='output') {
@@ -166,7 +222,7 @@ function terminalLine(text,type='output') {
   output.scrollTop=output.scrollHeight;
 }
 async function runCommand() {
-  if (!session?.started || busy) return;
+  if (!session?.started || busy || tutorial.isOpen()) return;
   const input=$('#terminal-input'), raw=input.value.trim();
   if(!raw) return;
   busy=true; $('.run-button').disabled=true;
@@ -180,7 +236,14 @@ async function runCommand() {
     if(!result.error&&result.events.some(event=>event.type==='clear')) $('#terminal-output').replaceChildren();
     if(result.output) terminalLine(result.output,result.error?'error':'output');
     else if(!result.error) terminalLine('✓ Done.','system');
+    const before = session.tasks.filter(Boolean).length;
     verify(result); persist();
+    if (result.error) wakePatch('thinking', 'That move didn’t land. Check the message, adjust your command, and try again.');
+    else if (session.tasks.filter(Boolean).length > before) {
+      wakePatch('celebrate', 'Nice find! That clue checks out. We’re getting somewhere.');
+      const scene = $('.mission-scene');
+      if (scene) { scene.dataset.effect = 'verified'; setTimeout(() => { if (scene.isConnected) delete scene.dataset.effect; }, 850); }
+    }
     $('.terminal-prompt').textContent='trainee@trail:'+session.shell.cwd.replace('/home/trainee','~')+'$';
   } catch(error) {terminalLine('Patch hit a snag: '+error.message,'error');}
   finally{busy=false; if($('.run-button')) $('.run-button').disabled=false;}
@@ -203,6 +266,16 @@ function updateTasks() {
   $('#debrief').disabled=count!==total;
   $('#mission-feedback').textContent=count===total?'All evidence collected. Tell Nova what you found.':'Make the moves. Follow the clues. Then make your call.';
   const decisionDone=missions[current].objectives.some((objective,index)=>objective.check.type==='decision'&&session.tasks[index]);
+  const cluesDone=missions[current].objectives.every((objective,index)=>objective.check.type==='decision'||session.tasks[index]);
+  const state=count===total?'complete':cluesDone?'decision':'exploring';
+  $('.mission-scene').dataset.state=state;
+  $('#scene-status').textContent=count===total?'Evidence secured · Ready to reflect':cluesDone?'Clues collected · Your call':count?'A new clue · Keep following the trail':'Your next clue is waiting';
+  $$('[data-stage]').forEach(stage=>{
+    const complete=stage.dataset.stage==='clues'?cluesDone:stage.dataset.stage==='decision'?decisionDone:false;
+    const active=stage.dataset.stage===(count===total?'reflection':cluesDone?'decision':'clues');
+    stage.classList.toggle('completed',complete);stage.classList.toggle('active',active);
+    if(active)stage.setAttribute('aria-current','step');else stage.removeAttribute('aria-current');
+  });
   if(decisionDone){
     const correct=missions[current].decision.options.find(option=>option.correct);
     const button=$('[data-decision="'+correct.id+'"]');
@@ -212,21 +285,49 @@ function updateTasks() {
   }
 }
 function makeDecision(id) {
-  if(!session.started)return;
+  if(!session.started||tutorial.isOpen())return;
   const option=missions[current].decision.options.find(item=>item.id===id); if(!option)return;
   const requiredEvidence=missions[current].objectives.every((objective,index)=>objective.check.type==='decision'||session.tasks[index]);
   if(!requiredEvidence){$('#decision-feedback').textContent='Collect the terminal evidence first. Your call should follow what you found.';return;}
   $$('[data-decision]').forEach(button=>{button.classList.remove('correct','wrong');button.setAttribute('aria-pressed',String(button.dataset.decision===id));});
   $('[data-decision="'+id+'"]').classList.add(option.correct?'correct':'wrong');
   $('#decision-feedback').textContent=option.feedback;
-  if(option.correct){verify({output:'',error:false,events:[{type:'decision',value:id}]});persist();}
+  if(option.correct){verify({output:'',error:false,events:[{type:'decision',value:id}]});persist();wakePatch('celebrate','That’s a call backed by evidence. Nova is ready for your field report.');}
+  else wakePatch('thinking','We can rethink that. Let the clues guide the next choice.');
+}
+function updateHintMeter() {
+  $$('.hint-meter span').forEach((item,index)=>{
+    item.classList.toggle('used',index<session.hints);
+    item.classList.toggle('active',index===Math.min(session.hints,3)-1);
+  });
+  $('.hint-meter')?.setAttribute('aria-label',Math.min(session.hints,3)+' of 3 clue strengths revealed');
+}
+function wakePatch(emotion,text) {
+  const card=$('.hint-companion'), portrait=$('#patch-chat');
+  if(!card)return;
+  card.dataset.emotion=emotion;
+  $('#patch-response').textContent=text;
+  portrait?.classList.remove('speaking');
+  if(portrait){void portrait.offsetWidth;portrait.classList.add('speaking');}
+  clearTimeout(wakePatch.timer);
+  wakePatch.timer=setTimeout(()=>{if(portrait?.isConnected)portrait.classList.remove('speaking');},1800);
+}
+function checkInWithPatch() {
+  const lines=session.tasks.every(Boolean)?['Look at that. A whole trail stop figured out. Tell Nova what you learned.']:
+    !session.started?['I’ve packed the snacks and warmed up the terminal. Start when you’re comfortable.','Read Nova’s brief first. We’ll take the next step together.']:
+    ['One command. One clue. We don’t have to solve the whole mountain at once.','Curiosity is a very good tool. Check the file, follow the evidence, then make your call.','If the trail feels foggy, ask me for a nudge. That’s what companions are for.'];
+  checkInWithPatch.index=((checkInWithPatch.index??-1)+1)%lines.length;
+  wakePatch('thinking',lines[checkInWithPatch.index]);
 }
 function giveHint() {
+  if(tutorial.isOpen())return;
   if(!session.started)return toast('Start this mission first, then Patch can help.');
   session.hints++;
   const mission=missions[current];
   $('#hint-text').textContent=mission.hints[Math.min(session.hints-1,mission.hints.length-1)];
   $('#hint-button').textContent='Ask Patch ('+session.hints+')';
+  updateHintMeter();
+  wakePatch('hint',session.hints<3?'A little nudge. Try it out, and we’ll follow the next clue.':'Here’s the route. Take it one command at a time and watch what each move tells you.');
   persist();
 }
 function restartMission() {
@@ -254,17 +355,22 @@ function showScene(preview=false) {
   renderScene();$('.cinematic').focus();
 }
 function renderScene() {
-  const mission=missions[current],frame=mission.story[sceneIndex];
+  const mission=missions[current],frame=mission.story[sceneIndex],presentation=getPresentation(mission,sceneIndex),scene=presentation.scene;
   $('.cinematic').dataset.act = String(mission.act);
   $('.cinematic').dataset.frame = String(sceneIndex);
-  $('.cinematic').innerHTML='<div class="cinematic-art"><div class="cinematic-grain"></div><span class="cinematic-label">THE SIGNAL ACADEMY / HIKE TRAIL</span><div class="cinematic-orbit"><span class="animated-patch">◉‿◉</span></div><span class="cinematic-location">'+escape(mission.location)+'</span></div><div class="cinematic-content"><div class="story-speaker">'+escape(frame.speaker)+' · TRANSMISSION '+(sceneIndex+1)+' / '+mission.story.length+'</div><h2 id="cinematic-title">'+escape(frame.title)+'</h2><p>'+escape(frame.text)+'</p></div><div class="cinematic-footer"><div class="scene-dots" aria-label="Story frame '+(sceneIndex+1)+' of '+mission.story.length+'">'+mission.story.map((_,index)=>'<span class="'+(index===sceneIndex?'active':'')+'"></span>').join('')+'</div><div class="cinematic-buttons"><button class="button ghost" id="scene-skip" data-testid="scene-skip">'+(previewScene?'Close preview':'Skip story')+'</button><button class="button primary" id="scene-next" data-testid="scene-next">'+(sceneIndex===mission.story.length-1?(previewScene?'Back to the adventure':'Let’s do this →'):'Continue story →')+'</button></div></div>';
+  $('.cinematic').dataset.speaker=presentation.speaker.name.toLowerCase();
+  $('.cinematic').dataset.palette=scene.palette;
+  $('.cinematic').innerHTML='<div class="cinematic-art" data-scene="'+escape(scene.id)+'" role="img" aria-label="'+escape(scene.alt)+'" style="'+atlasStyle(scene)+'"><div class="cinematic-grain"></div><span class="cinematic-label">THE SIGNAL ACADEMY / HIKE TRAIL</span><div class="mission-prop" aria-hidden="true">'+renderPropIcon(scene.prop)+'</div>'+portrait(presentation.speaker.name,'speaking-character companion-portrait')+'<span class="cinematic-location">'+escape(scene.label)+'</span></div><div class="cinematic-content"><div class="story-speaker">'+escape(frame.speaker)+' · TRANSMISSION '+(sceneIndex+1)+' / '+mission.story.length+'</div><h2 id="cinematic-title">'+escape(frame.title)+'</h2><p>'+escape(frame.text)+'</p></div><div class="cinematic-footer"><div class="scene-dots" aria-label="Story frame '+(sceneIndex+1)+' of '+mission.story.length+'">'+mission.story.map((_,index)=>'<span class="'+(index===sceneIndex?'active':'')+'"></span>').join('')+'</div><div class="cinematic-buttons"><button class="button ghost" id="scene-skip" data-testid="scene-skip">'+(previewScene?'Close preview':'Skip story')+'</button><button class="button primary" id="scene-next" data-testid="scene-next">'+(sceneIndex===mission.story.length-1?(previewScene?'Back to the adventure':'Let’s do this →'):'Continue story →')+'</button></div></div>';
   $('#scene-skip').onclick=()=>closeScene(true);
   $('#scene-next').onclick=()=>{if(sceneIndex<mission.story.length-1){sceneIndex++;renderScene();$('#scene-next').focus();}else closeScene(true);};
 }
 function closeScene(restore=true) {
   $('#cinematic-backdrop').classList.add('hidden');
   if($('#dialog-backdrop').classList.contains('hidden'))document.body.style.overflow='';
-  if(restore){if(view==='game'&&!previewScene&&!session.started)$('#start-mission')?.focus();else if(dialogReturn?.isConnected)dialogReturn.focus();}
+  if(restore){
+    if(view==='game'&&!previewScene&&!profile.settings.tutorialSeen){tutorial.open();return;}
+    if(view==='game'&&!previewScene&&!session.started)$('#start-mission')?.focus();else if(dialogReturn?.isConnected)dialogReturn.focus();
+  }
 }
 function openDialog(content) {
   if ($('#dialog-backdrop').classList.contains('hidden')) dialogReturn=document.activeElement;
@@ -355,22 +461,24 @@ function settings() {
   };
 }
 document.addEventListener('keydown',event=>{
+  if(tutorial.isOpen())return;
   const backdrop=!$('#cinematic-backdrop').classList.contains('hidden')?$('#cinematic-backdrop'):!$('#dialog-backdrop').classList.contains('hidden')?$('#dialog-backdrop'):null;
   if(!backdrop)return;
   if(event.key==='Escape'){event.preventDefault();if(backdrop.id==='cinematic-backdrop')closeScene(true);else closeDialog();}
   if(event.key==='Tab'){
     const focusable=$$('button:not([disabled]),input:not([disabled]),textarea,a[href],[tabindex="0"]',backdrop).filter(node=>node.getClientRects().length);
     if(!focusable.length){event.preventDefault();return;}
-    const first=focusable[0],last=focusable.at(-1);
-    if(event.shiftKey&&(document.activeElement===first||!backdrop.contains(document.activeElement))){event.preventDefault();last.focus();}
-    else if(!event.shiftKey&&(document.activeElement===last||!backdrop.contains(document.activeElement))){event.preventDefault();first.focus();}
+    const first=focusable[0],last=focusable.at(-1),active=document.activeElement;
+    if(!focusable.includes(active)){event.preventDefault();(event.shiftKey?last:first).focus();}
+    else if(event.shiftKey&&active===first){event.preventDefault();last.focus();}
+    else if(!event.shiftKey&&active===last){event.preventDefault();first.focus();}
   }
 });
 $('#dialog-backdrop').onclick=event=>{if(event.target===$('#dialog-backdrop'))closeDialog();};
 reduceMotion.addEventListener('change',applySettings);
 setInterval(()=>{
   const now=performance.now(),delta=Math.min((now-tickAt)/1000,2);tickAt=now;
-  if(view==='game'&&session?.started&&!document.hidden&&$('#dialog-backdrop').classList.contains('hidden')&&$('#cinematic-backdrop').classList.contains('hidden')&&!session.tasks.every(Boolean)){
+  if(view==='game'&&session?.started&&!document.hidden&&!tutorial.isOpen()&&$('#dialog-backdrop').classList.contains('hidden')&&$('#cinematic-backdrop').classList.contains('hidden')&&!session.tasks.every(Boolean)){
     session.elapsed+=delta;
     if($('#session-timer'))$('#session-timer').textContent=timingText();
     if(Math.floor(session.elapsed)%5===0)persist();

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { missions } from '../src/curriculum.js';
 
@@ -18,10 +18,12 @@ const page = await context.newPage();
 const pageErrors = [];
 const unexpectedDialogs = [];
 const resourceErrors = [];
+const fontAssets = new Set();
 page.on('pageerror', error => pageErrors.push(error.message));
 page.on('dialog', async dialog => { unexpectedDialogs.push(dialog.message()); await dialog.dismiss(); });
 page.on('response', response => {
   if (response.url().startsWith(baseURL) && response.status() >= 400) resourceErrors.push(`${response.status()} ${response.url()}`);
+  if (response.request().resourceType() === 'font' && response.status() === 200) fontAssets.add(response.url());
 });
 page.on('requestfailed', request => {
   if (request.url().startsWith(baseURL)) resourceErrors.push(`${request.failure()?.errorText} ${request.url()}`);
@@ -50,6 +52,7 @@ async function assertNoOverflow(label) {
 
 async function screenshot(label, width) {
   await page.setViewportSize({ width, height: width < 800 ? 900 : 1000 });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await assertNoOverflow(`${label} at ${width}px`);
   await page.screenshot({ path: new URL(`${label}-${width}.png`, results).pathname, fullPage: true });
 }
@@ -65,7 +68,7 @@ async function runCommand(command, requireSuccess = false, pointer = false) {
   }
 }
 
-async function enterMission(watchStory = false) {
+async function closeStory(watchStory = false) {
   if (watchStory) {
     let frames = 0;
     while (await visible('scene-next')) {
@@ -73,8 +76,136 @@ async function enterMission(watchStory = false) {
       await click('scene-next');
     }
   } else if (await visible('scene-skip')) await click('scene-skip');
+}
+
+async function walkTutorial() {
+  const guide = page.locator('#tutorial-backdrop');
+  await ui('tour-next').waitFor({ state: 'visible' });
+  const titles = new Set();
+  for (let step = 0; step < 6; step++) {
+    assert.match(await ui('tour-progress').innerText(), new RegExp(`0?${step + 1}\\s*(?:/|of)\\s*0?6`, 'i'), 'The guide shows the current step');
+    titles.add(await guide.locator('h2').innerText());
+    await click('tour-next');
+  }
+  assert.equal(titles.size, 6, 'All six guide steps explain a different part of the mission');
+  await guide.waitFor({ state: 'hidden' });
+}
+
+async function tutorialSnapshot() {
+  return {
+    objectives: await objectiveStatus(),
+    hints: await page.locator('#hint-button').innerText(),
+    timer: await page.locator('#session-timer').innerText(),
+    commands: await page.locator('#terminal-output .terminal-line.command').count(),
+    completed: await page.locator('.trail-progress > p').innerText(),
+    terminalDisabled: await ui('terminal-input').isDisabled(),
+  };
+}
+
+async function assertOnscreen(locator, label) {
+  const box = await locator.boundingBox();
+  const viewport = page.viewportSize();
+  assert.ok(box && box.x >= -1 && box.x + box.width <= viewport.width + 1 && box.y >= -1 && box.y + box.height <= viewport.height + 1, `${label} fits within the viewport: ${JSON.stringify(box)}`);
+}
+
+async function exerciseFirstTutorial() {
+  const guide = page.locator('#tutorial-backdrop');
+  await ui('tour-next').waitFor({ state: 'visible' });
+  const before = await tutorialSnapshot();
+  assert.ok(before.objectives.every(status => !status), 'The guide begins before any objective is awarded');
+  assert.equal(before.terminalDisabled, true, 'The guide does not start the mission');
+  assert.match(before.timer, /0:00/, 'The learning timer has not started');
+  assert.equal(before.commands, 0, 'The guide does not execute sample commands');
+  const title = await guide.locator('h2').innerText();
+  await click('tour-next');
+  assert.notEqual(await guide.locator('h2').innerText(), title, 'Next explains the following part of the mission');
+  await click('tour-back');
+  assert.equal(await guide.locator('h2').innerText(), title, 'Back returns to the previous explanation');
+  for (let step = 0; step < 8; step++) {
+    assert.ok(await guide.evaluate(element => element.contains(document.activeElement)), 'The guide keeps keyboard focus in its controls');
+    await page.keyboard.press('Tab');
+  }
+  await screenshot('tutorial', 1440);
+  await screenshot('tutorial', 390);
+  await assertOnscreen(guide.locator('[role="dialog"]'), 'The mobile guide card');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.waitForFunction(() => document.body.dataset.motion === 'off');
+  await click('tour-next');
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await click('tour-next');
+  assert.match(await ui('tour-progress').innerText(), /0?3\s*(?:\/|of)\s*0?6/i, 'The third step explains the terminal');
+  for (const [preview, output] of [[0, /\/home\/trainee/], [1, /trainee/], [2, /trail note/i]]) {
+    await click(`tour-demo-${preview}`);
+    assert.match(await guide.locator('.tour-demo-output').innerText(), output, 'A preview explains the result of its command');
+    assert.ok((await guide.locator('.tour-demo-meaning').innerText()).length > 10, 'Each preview explains what its command means');
+  }
+  assert.deepEqual(await tutorialSnapshot(), before, 'Trying command previews never executes mission commands or changes progress');
+  const terminal = await page.locator('.terminal-window').boundingBox();
+  assert.ok(terminal && terminal.y < page.viewportSize().height && terminal.y + terminal.height > 0, 'The mobile guide scrolls an offscreen terminal into view');
+  await assertOnscreen(guide.locator('[role="dialog"]'), 'The anchored mobile guide card');
+  await assertNoOverflow('Mobile guided tutorial');
+  for (let step = 3; step <= 6; step++) {
+    await click('tour-next');
+    if (step < 6) await assertOnscreen(guide.locator('[role="dialog"]'), 'Each mobile guide explanation');
+  }
+  await guide.waitFor({ state: 'hidden' });
+  assert.deepEqual(await tutorialSnapshot(), before, 'Reading every guide step changes no tasks, hints, commands, timer, or mission progress');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const replay = ui('tour-replay').filter({ visible: true }).first();
+  await replay.click();
+  await ui('tour-next').waitFor({ state: 'visible' });
+  await page.keyboard.press('Escape');
+  await guide.waitFor({ state: 'hidden' });
+  assert.ok(await replay.evaluate(element => document.activeElement === element), 'Escape from a replay restores the replay button focus');
+  await replay.click();
+  await click('tour-skip');
+  await guide.waitFor({ state: 'hidden' });
+  assert.deepEqual(await tutorialSnapshot(), before, 'Replaying or skipping the guide leaves the mission untouched');
+}
+
+async function enterMission(watchStory = false) {
+  await closeStory(watchStory);
+  if (await visible('tour-next')) await walkTutorial();
   if (await visible('start-mission')) await click('start-mission');
   await ui('terminal-input').waitFor({ state: 'visible' });
+}
+
+async function assertRenderedIllustration(locator, label) {
+  await locator.waitFor({ state: 'visible' });
+  await locator.locator('img').evaluateAll(images => Promise.all(images.map(image => image.decode().catch(() => {}))));
+  const rendered = await locator.evaluate(element => {
+    const images = [...element.querySelectorAll('img')];
+    const imageReady = images.some(image => image.complete && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0);
+    const layers = [element, ...element.querySelectorAll('*')].map(node => getComputedStyle(node).backgroundImage);
+    return imageReady || layers.some(layer => /url\(/.test(layer));
+  });
+  assert.ok(rendered, `${label} uses a visible image or sprite`);
+}
+
+async function assertCinematicSpeaker(expected) {
+  const character = page.locator('#cinematic-backdrop .speaking-character');
+  assert.equal(await character.getAttribute('data-speaker'), expected, 'The portrait matches the current speaker');
+  await assertRenderedIllustration(character, `${expected} speaking portrait`);
+}
+
+async function cinematicPicture() {
+  return page.locator('#cinematic-backdrop .cinematic-art').evaluate(element => {
+    const painting = element.querySelector('.scene-viewport') || element;
+    const style = getComputedStyle(painting);
+    return { key: element.dataset.scene, image: style.backgroundImage, position: style.backgroundPosition };
+  });
+}
+
+async function assertMissionArtwork(index) {
+  const scene = page.locator('#app .mission-scene[data-scene]').first();
+  await scene.waitFor({ state: 'visible' });
+  const key = await scene.getAttribute('data-scene');
+  assert.ok(key, `Mission ${index + 1} has an assigned story location`);
+  if (index === 2) assert.match(key, /owl|porch/i, 'The owl mission uses its message-porch scene');
+  if (index === 3) assert.match(key, /squirrel|burrow/i, 'The squirrel mission uses its supply-burrow scene');
+  await assertRenderedIllustration(scene, `Mission ${index + 1} scene`);
+  return key;
 }
 
 async function assertDialogKeyboard(opener) {
@@ -140,6 +271,12 @@ try {
   assert.equal(response.status(), 200, 'The development server serves the app successfully');
   assert.deepEqual(pageErrors, [], 'The app initializes without uncaught errors');
   assert.deepEqual(resourceErrors, [], 'Initial app scripts, styles, and artwork load successfully');
+  await page.evaluate(() => document.fonts.ready);
+  assert.ok(fontAssets.size >= 2, 'The upgraded design loads its display and reading fonts');
+  assert.ok([...fontAssets].every(url => url.startsWith(baseURL)), 'The design fonts load from the local application');
+  const fonts = await page.evaluate(() => [...document.fonts].map(face => ({ family: face.family, status: face.status })));
+  assert.ok(new Set(fonts.filter(face => face.status === 'loaded').map(face => face.family)).size >= 2, 'The local fonts decode successfully and replace fallback typography');
+  assert.ok(fonts.every(face => face.status !== 'error'), 'No local font fails decoding');
   for (const width of [1440, 768, 390]) await screenshot('landing', width);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await assertLockedChapter('chapter-office');
@@ -153,12 +290,16 @@ try {
   await click('slot-1');
   await click('start-journey');
   await ui('scene-next').waitFor({ state: 'visible' });
+  await assertCinematicSpeaker(missions[0].story[0].speaker);
   await screenshot('cutscene', 1440);
   await screenshot('cutscene', 390);
   await page.setViewportSize({ width: 1440, height: 1000 });
   const openingScene = await page.getByRole('dialog').filter({ visible: true }).innerText();
   await click('scene-next');
   assert.notEqual(await page.getByRole('dialog').filter({ visible: true }).innerText(), openingScene, 'Cutscenes progress through story frames');
+  await assertCinematicSpeaker(missions[0].story[1].speaker);
+  await closeStory();
+  await exerciseFirstTutorial();
   await enterMission();
 
   assert.ok(await ui('debrief').isDisabled(), 'Unfinished evidence cannot open a debrief');
@@ -192,6 +333,9 @@ try {
   const originalHint = await page.locator('#hint-text').innerText();
   await page.locator('#hint-button').click();
   assert.notEqual(await page.locator('#hint-text').innerText(), originalHint, 'Patch provides a useful hint');
+  assert.equal(await page.locator('.hint-companion').getAttribute('data-emotion'), 'hint', 'Asking for help changes Patch’s expression');
+  assert.equal(await page.locator('.patch-speech').getAttribute('role'), 'status', 'Patch’s reply is announced accessibly');
+  assert.equal(await page.locator('.patch-speech').innerText(), missions[0].hints[0], 'Patch delivers the first hint');
   assert.ok((await objectiveStatus()).every(status => !status), 'Hints guide learning without awarding objective evidence');
 
   await page.setViewportSize({ width: 390, height: 900 });
@@ -202,6 +346,7 @@ try {
   assert.ok(partialObjectives.some(Boolean), 'A valid command completes its matching objective');
   await page.reload({ waitUntil: 'networkidle' });
   if (await visible('start-journey')) await click('start-journey');
+  assert.equal(await visible('tour-next'), false, 'A completed guide is remembered when the journey resumes');
   await enterMission();
   assert.deepEqual(await objectiveStatus(), partialObjectives, 'Reload preserves in-progress objective evidence');
   assert.match(await page.locator('#hint-button').innerText(), /\(1\)/, 'Reload retains the number of hints used');
@@ -215,12 +360,29 @@ try {
   await page.waitForFunction(() => document.body.dataset.motion === 'off');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.waitForFunction(() => document.body.dataset.motion === 'on');
+  await ui('tour-replay').filter({ visible: true }).first().click();
+  await ui('tour-next').waitFor({ state: 'visible' });
+  const activeTourState = await tutorialSnapshot();
+  await page.waitForTimeout(1250); // Cross an actual one-second learning-clock tick.
+  assert.deepEqual(await tutorialSnapshot(), activeTourState, 'Replaying a guide pauses an already running mission clock and consumes no hint or evidence');
+  await page.keyboard.press('Escape');
+  await page.locator('#tutorial-backdrop').waitFor({ state: 'hidden' });
+  const hintEvidence = await objectiveStatus();
+  await page.locator('#patch-chat').click();
+  assert.ok((await page.locator('.patch-response').innerText()).length > 10, 'Clicking Patch opens a conversational check-in');
+  assert.match(await page.locator('#hint-button').innerText(), /\(1\)/, 'A companion check-in consumes no hint');
+  assert.deepEqual(await objectiveStatus(), hintEvidence, 'A companion check-in awards no objective');
+  await page.locator('#hint-button').click();
+  assert.equal(await page.locator('.patch-speech').innerText(), missions[0].hints[1], 'A second request provides the next hint');
+  assert.equal(await page.locator('.hint-companion').getAttribute('data-emotion'), 'hint', 'Patch reacts to a second hint request');
+  assert.deepEqual(await objectiveStatus(), hintEvidence, 'Graduated hints still require the player to collect evidence');
   await assertDialogKeyboard('notebook');
   for (const width of [1440, 768, 390]) await screenshot('mission', width);
   await page.setViewportSize({ width: 1440, height: 1000 });
 
   for (let index = 0; index < missions.length; index++) {
     const mission = missions[index];
+    await assertMissionArtwork(index);
     assert.equal(await page.locator('.trail-node:not([disabled])').count(), index + 1, `Mission ${index + 1} unlocks after its predecessor`);
     for (const command of mission.solutions.slice(index === 0 ? 1 : 0)) await runCommand(command, true);
     if (index === 1) {
@@ -236,6 +398,24 @@ try {
     console.log(`✓ ${String(index + 1).padStart(2, '0')}. ${mission.title}`);
     if (index < missions.length - 1) {
       await click('next-mission');
+      await assertCinematicSpeaker(missions[index + 1].story[0].speaker);
+      if (index === 1 || index === 2) {
+        const key = await page.locator('#cinematic-backdrop .cinematic-art').getAttribute('data-scene');
+        assert.match(key, index === 1 ? /owl|porch/i : /squirrel|burrow/i, 'The illustration changes to match the owl or squirrel story');
+        await screenshot(index === 1 ? 'owl-story' : 'squirrel-story', index === 1 ? 1440 : 390);
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        const opening = await cinematicPicture();
+        await click('scene-next');
+        const second = await cinematicPicture();
+        assert.notEqual(second.key, opening.key, 'Story advancement changes the illustrated focus');
+        await assertCinematicSpeaker(missions[index + 1].story[1].speaker);
+        if (index === 1) assert.notEqual(second.position, opening.position, 'The owl story moves from the owl porch to the field desk');
+        await click('scene-next');
+        const third = await cinematicPicture();
+        assert.notEqual(third.key, second.key, 'The final story frame shows its own evidence');
+        assert.notEqual(third.position, opening.position, 'The final owl or squirrel frame changes its illustrated location');
+        await assertCinematicSpeaker(missions[index + 1].story[2].speaker);
+      }
       await enterMission(index === 0);
       if (index === 0) {
         await click('notebook');
@@ -254,10 +434,19 @@ try {
   for (const slot of [2, 3]) {
     await click(`slot-${slot}`);
     await click('start-journey');
+    await closeStory();
+    assert.equal(await visible('tour-next'), true, `Fresh journey ${slot} gets its own guide`);
+    if (slot === 2) await click('tour-skip');
     await enterMission();
     assert.ok((await objectiveStatus()).every(status => !status), `Slot ${slot} starts with independent objective progress`);
     assert.match(await page.locator('.trail-progress > p').innerText(), /0\s*[/]\s*24/, `Slot ${slot} has no completed missions`);
     await click('home');
+    if (slot === 2) {
+      await click('start-journey');
+      assert.equal(await visible('tour-next'), false, 'Skipping the guide persists only for the selected journey');
+      await enterMission();
+      await click('home');
+    }
   }
   await click('slot-1');
   await click('start-journey');
@@ -282,11 +471,32 @@ try {
   await page.locator('#import-file').setInputFiles(backupPath);
   await page.locator('#confirm-import').click();
   await click('start-journey');
+  assert.equal(await visible('tour-next'), false, 'An imported completed guide is remembered');
   await enterMission();
   assert.match(await page.locator('.trail-progress > p').innerText(), /24\s*[/]\s*24/, 'A downloaded journey restores through the public import flow');
   await click('notebook');
   assert.equal(await page.locator('.notebook-note p').innerText(), reflection, 'Imported backups retain reflections');
   await page.keyboard.press('Escape');
+
+  // Simulate a pre-tutorial V5 export by omitting only the newly optional preference.
+  // All completed missions, sessions, files, scores, and notes stay exactly as exported.
+  const returningBackup = JSON.parse(await readFile(backupPath, 'utf8'));
+  delete returningBackup.settings.tutorialSeen;
+  const returningPath = new URL('returning-v5-backup.json', results).pathname;
+  await writeFile(returningPath, JSON.stringify(returningBackup));
+  await click('settings');
+  await page.locator('#import-file').setInputFiles(returningPath);
+  await page.locator('#confirm-import').click();
+  await click('start-journey');
+  assert.equal(await visible('tour-next'), true, 'A returning V5 journey receives the new guide once');
+  const returningState = await tutorialSnapshot();
+  await walkTutorial();
+  assert.deepEqual(await tutorialSnapshot(), returningState, 'A returning-player guide preserves existing evidence, hints, timer, and progress');
+  assert.match(await page.locator('.trail-progress > p').innerText(), /24\s*[/]\s*24/, 'The new guide preserves the returning player’s completed foundation');
+  await page.reload({ waitUntil: 'networkidle' });
+  await click('start-journey');
+  assert.equal(await visible('tour-next'), false, 'A returning player’s completed guide persists across reload');
+  await enterMission();
   await click('settings');
   await page.locator('#reset-slot').click();
   await page.locator('#confirm-reset').click();
@@ -297,7 +507,7 @@ try {
   assert.deepEqual(unexpectedDialogs, [], 'User terminal text does not invoke browser dialogs');
   assert.deepEqual(resourceErrors, [], 'All requested local game resources load successfully');
   await rm(new URL('failure.png', results), { force: true });
-  console.log('Browser regression passed: 24 missions, progression gates, story scenes, save/resume, independent profiles, backup import/export, motion settings, keyboard dialogs, escaped text, and responsive layouts.');
+  console.log('Browser regression passed: 24 missions, guided tutorial, matching scenes and speakers, interactive Patch hints, local fonts, progression gates, save/resume, independent profiles, backups, accessibility, and responsive layouts.');
 } catch (error) {
   await page.screenshot({ path: new URL('failure.png', results).pathname, fullPage: true }).catch(() => {});
   throw error;

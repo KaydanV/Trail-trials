@@ -165,7 +165,7 @@ export function createProgress(missions) {
   const ids = missionList(missions);
   return {
     version: SAVE_VERSION, currentMission: ids[0], completed: [], notes: {}, scores: {},
-    settings: { motion: true, practice: true }, sessions: {}, updatedAt: new Date().toISOString()
+    settings: { motion: true, practice: true, tutorialSeen: false }, sessions: {}, updatedAt: new Date().toISOString()
   };
 }
 
@@ -193,10 +193,11 @@ export function normalizeProgress(input, missions) {
       seconds: number(value.seconds, 31536000, 'Mission time', { integer: false })
     };
   });
-  allowedKeys(input.settings ?? {}, ['motion', 'practice'], 'Settings');
+  allowedKeys(input.settings ?? {}, ['motion', 'practice', 'tutorialSeen'], 'Settings');
   result.settings = {
     motion: input.settings?.motion === undefined ? true : boolean(input.settings.motion, 'Motion setting'),
-    practice: input.settings?.practice === undefined ? true : boolean(input.settings.practice, 'Practice setting')
+    practice: input.settings?.practice === undefined ? true : boolean(input.settings.practice, 'Practice setting'),
+    tutorialSeen: input.settings?.tutorialSeen === undefined ? false : boolean(input.settings.tutorialSeen, 'Tutorial setting')
   };
   result.sessions = missionMap(input.sessions ?? {}, ids, 'Sessions', (value, id) => {
     allowedKeys(value, ['shell', 'tasks', 'started', 'commands', 'hints', 'elapsed'], 'Mission session');
