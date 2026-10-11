@@ -629,7 +629,10 @@ export const missions = [
     },
     objectives: [
       command('filter', 'Filter the failed authentication events', 'Use grep AUTH_FAIL logs/auth.log.', 'grep', ['AUTH_FAIL', 'logs/auth.log'], ['outside-policy']),
-      command('count', 'Count matching lines with a pipeline', 'Run grep AUTH_FAIL logs/auth.log | wc -l. | passes the matching lines to wc; -l (lowercase L) counts them.', 'wc', ['-l'], ['3']),
+      { ...command('count', 'Count matching lines with a pipeline', 'Run grep AUTH_FAIL logs/auth.log | wc -l. | passes the matching lines to wc; -l (lowercase L) counts them.', 'wc', ['-l'], ['3']), check: {
+        type: 'command', name: 'wc', argsIncludes: ['-l'], outputIncludes: ['3'],
+        pipeline: [{ name: 'grep', argsIncludes: ['AUTH_FAIL', 'logs/auth.log'], outputIncludes: ['outside-policy'] }],
+      } },
       read('baseline', 'Read the expected activity baseline', 'Read logs/baseline.txt with cat. A baseline describes expected activity; compare it with your three events.', 'logs/baseline.txt'),
     ],
     solutions: ['grep AUTH_FAIL logs/auth.log', 'grep AUTH_FAIL logs/auth.log | wc -l', 'cat logs/baseline.txt'],

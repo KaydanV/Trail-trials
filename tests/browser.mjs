@@ -56,6 +56,7 @@ async function screenshot(label, width) {
   await page.setViewportSize({ width, height: width < 800 ? 900 : 1000 });
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await assertNoOverflow(`${label} at ${width}px`);
+  if (await page.locator('#cinematic-backdrop .speaking-character').isVisible()) await assertCinematicSeparation();
   await page.screenshot({ path: new URL(`${label}-${width}.png`, results).pathname, fullPage: true });
 }
 
@@ -189,6 +190,21 @@ async function assertCinematicSpeaker(expected) {
   const character = page.locator('#cinematic-backdrop .speaking-character');
   assert.equal(await character.getAttribute('data-speaker'), expected, 'The portrait matches the current speaker');
   await assertRenderedIllustration(character, `${expected} speaking portrait`);
+  await assertCinematicSeparation();
+}
+
+async function assertCinematicSeparation() {
+  const art = page.locator('#cinematic-backdrop .cinematic-art');
+  await art.evaluate(async element => {
+    const finite = element.querySelector('.speaking-character').getAnimations({ subtree: true }).filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime));
+    await Promise.all(finite.map(animation => animation.finished.catch(() => {})));
+  });
+  const portrait = await art.locator('.speaking-character').boundingBox();
+  const caption = await art.locator('.cinematic-location').boundingBox();
+  assert.ok(portrait && caption, 'The cinematic portrait and location caption both render');
+  const overlapWidth = Math.min(portrait.x + portrait.width, caption.x + caption.width) - Math.max(portrait.x, caption.x);
+  const overlapHeight = Math.min(portrait.y + portrait.height, caption.y + caption.height) - Math.max(portrait.y, caption.y);
+  assert.ok(overlapWidth <= 1 || overlapHeight <= 1, `The location caption stays clear of the speaking portrait: ${JSON.stringify({ portrait, caption })}`);
 }
 
 async function cinematicPicture() {
@@ -282,6 +298,47 @@ async function expectedHint(mission, strength = 0) {
   return getHint(mission, { tasks: await objectiveStatus() }, strength).text;
 }
 
+async function assertTextContrast(locator, label) {
+  const colors = await locator.evaluate(element => {
+    const parse = value => (value.match(/[\d.]+/g) || []).map(Number);
+    const style = getComputedStyle(element);
+    let current = element, background = parse(style.backgroundColor);
+    while (background.length === 4 && background[3] === 0 && current.parentElement) {
+      current = current.parentElement;
+      background = parse(getComputedStyle(current).backgroundColor);
+    }
+    return { text: parse(style.color), background };
+  });
+  const luminance = color => color.slice(0, 3).map(value => value / 255)
+    .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+  const text = luminance(colors.text), background = luminance(colors.background);
+  const contrast = (Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05);
+  assert.ok(contrast >= 4.5, `${label} text contrast is ${contrast.toFixed(2)}:1, at least 4.5:1`);
+}
+
+function browserSolutions(mission) {
+  if (mission.id === 'hike-03') return [
+    'cat /home/trainee/porch/guide.txt', 'cd porch', 'head -2 ./relay.log',
+    'head -2 /home/trainee/porch/relay.log', 'tail -2 /home/trainee/porch/relay.log', 'cd ..',
+  ];
+  if (mission.id === 'hike-07') return mission.solutions.map(command => command === 'ls -l private' ? 'ls -la private' : command);
+  if (mission.id === 'hike-16') return mission.solutions.map(command => command === 'ss -tuln' ? 'ss -tlnu' : command);
+  if (mission.id === 'hike-21') return mission.solutions.map(command => command === 'grep AUTH_FAIL logs/auth.log | wc -l' ? 'cat logs/auth.log | grep AUTH_FAIL | wc -l' : command);
+  return mission.solutions;
+}
+
+async function rejectUnrelatedCount(mission, prepare = false) {
+  const before = await objectiveStatus();
+  const world = await worldSnapshot();
+  if (prepare) await runCommand('head -n 3 logs/auth.log > unrelated.txt', true);
+  await runCommand('wc -l unrelated.txt', true);
+  assert.equal((await page.locator('#terminal-output .terminal-line').last().innerText()).trim().split(/\s+/)[0], '3', 'The unrelated file genuinely contains the matching number of lines');
+  assert.deepEqual(await objectiveStatus(), before, 'A matching count from an unrelated file awards no authentication pipeline evidence');
+  assert.deepEqual(await worldSnapshot(), world, 'A matching unrelated count cannot advance the living scene');
+  await assertCurrentClue(mission);
+}
+
 async function assertMobileFieldControls(mission) {
   await page.setViewportSize({ width: 390, height: 900 });
   const before = await objectiveStatus();
@@ -352,6 +409,7 @@ async function finishPractice(mission) {
   await page.locator('#reflection').fill('A note for this practice case only.');
   await click('complete-mission');
   await assertWorldMatchesEvidence(mission, true);
+  await assertTextContrast(page.locator('#dialog-backdrop .field-return-message'), 'The practice completion field message');
   await page.keyboard.press('Escape');
   await page.locator('.practice-banner').waitFor({ state: 'visible' });
 }
@@ -535,6 +593,7 @@ async function finishMission(mission, index, probeWrong = false) {
   if (index === 0) await page.locator('#reflection').fill(reflection);
   await click('complete-mission');
   await assertWorldMatchesEvidence(mission, true);
+  await assertTextContrast(page.locator('#dialog-backdrop .field-return-message'), 'The canonical completion field message');
   assert.equal(await page.locator('.result-stats > div').last().locator('strong').innerText(), `${index + 1}/24`, `Mission ${index + 1} is saved as complete`);
   assert.equal(await page.locator('.result-stars').getAttribute('aria-label'), `${index === 0 ? 2 : 3} out of 3 stars`, 'Hint use affects the practice score without blocking progress');
 }
@@ -688,7 +747,8 @@ try {
     await assertCurrentClue(mission);
     assert.equal(await visible('practice-mission'), false, `Unfinished stop ${index + 1} cannot start optional practice`);
     assert.equal(await page.locator('.trail-node:not([disabled])').count(), index + 1, `Mission ${index + 1} unlocks after its predecessor`);
-    for (const command of mission.solutions.slice(index === 0 ? 1 : 0)) {
+    if (mission.id === 'hike-21') await rejectUnrelatedCount(mission, true);
+    for (const command of browserSolutions(mission).slice(index === 0 ? 1 : 0)) {
       const statuses = await objectiveStatus();
       const next = mission.objectives.find((_, objective) => !statuses[objective]);
       if ([18, 19, 22].includes(index) && next?.check.type === 'write') {
@@ -703,6 +763,7 @@ try {
       await runCommand(command, true);
       await assertWorldMatchesEvidence(mission);
       await assertCurrentClue(mission);
+      if (mission.id === 'hike-21' && command === 'grep AUTH_FAIL logs/auth.log') await rejectUnrelatedCount(mission);
     }
     if (index === 1) {
       const evidence = await objectiveStatus();

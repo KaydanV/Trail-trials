@@ -169,6 +169,68 @@ function inputData(shell, args, input, events, name) {
   if (args.length > 1) fail(`${name}: this lesson shell accepts one input file.`);
   return args.length && args[0] !== '-' ? readFile(shell, args[0], events) : input;
 }
+function lineArguments(name, args) {
+  let count = 10, files = [], seenCount = false;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '-n' || /^-\d+$/.test(arg)) {
+      if (seenCount) fail(`${name}: specify one line count.`);
+      const value = arg === '-n' ? args[++index] : arg.slice(1);
+      if (!/^\d+$/.test(value ?? '')) fail(`${name}: line count must be a nonnegative whole number.`);
+      count = Number(value); seenCount = true;
+    } else if (arg.startsWith('-') && arg !== '-') fail(`${name}: unsupported option: ${arg}`);
+    else files.push(arg);
+  }
+  return { count, files };
+}
+
+/** Semantic facts describe this teaching subset, rather than a particular spelling. */
+function commandDetails(name, args, cwd) {
+  const facts = new Set();
+  let stdin = false;
+  const addFlags = flags => flags.forEach(flag => facts.add(`flag:${flag}`));
+  const addPaths = (values, defaultPath) => {
+    if (!values.length && defaultPath !== undefined) values = [defaultPath];
+    stdin = !values.length || values.includes('-');
+    values.filter(value => value !== '-').forEach(value => facts.add(`path:${normalize({ cwd }, value)}`));
+  };
+  const fileOptions = { ls: 'al', cat: '', grep: 'in', sort: '', uniq: 'c', wc: 'l', tee: 'a', base64: 'd', sha256sum: '' };
+  if (Object.hasOwn(fileOptions, name)) {
+    const { flags, values } = options(name, args, fileOptions[name]);
+    addFlags(flags);
+    if (name === 'grep') {
+      facts.add(`pattern:${values[0]}`);
+      addPaths(values.slice(1));
+    } else addPaths(values, name === 'ls' ? '.' : undefined);
+    if (name === 'ls') stdin = false;
+    // tee writes its operands and always consumes the preceding stage's output.
+    if (name === 'tee') stdin = true;
+  } else if (name === 'head' || name === 'tail') {
+    const { count, files } = lineArguments(name, args);
+    facts.add(`count:${count}`); addPaths(files);
+  } else if (name === 'find') {
+    let index = 0;
+    const start = args[0] && !args[0].startsWith('-') ? args[index++] : '.';
+    addPaths([start]);
+    for (; index < args.length; index += 2) facts.add(`find:${args[index]}:${args[index + 1]}`);
+    stdin = false;
+  } else if (name === 'ss') {
+    addFlags(new Set(args.flatMap(arg => arg.startsWith('-') ? [...arg.slice(1)] : [])));
+  } else if (name === 'curl') {
+    facts.add(`flag:${args[0]}`); facts.add(`url:${new URL(args[1]).href}`);
+  } else if (name === 'ping') {
+    let count = 4;
+    for (let index = 0; index < args.length; index++) {
+      if (args[index] === '-c') count = Number(args[++index]);
+      else facts.add(`arg:${args[index]}`);
+    }
+    facts.add(`count:${count}`);
+  } else {
+    args.forEach(arg => facts.add(`arg:${arg}`));
+    stdin = name === 'awk';
+  }
+  return { facts, stdin };
+}
 function symbolicMode(mode, directory = false) {
   const bits = Number.parseInt(mode, 8);
   return (directory ? 'd' : '-') + [6, 3, 0].map(shift => {
@@ -457,18 +519,8 @@ async function run(shell, name, args, input, events) {
       return joinLines(found);
     }
     case 'head': case 'tail': {
-      let count = 10, fileArgs = [], seenCount = false;
-      for (let index = 0; index < args.length; index++) {
-        const arg = args[index];
-        if (arg === '-n' || /^-\d+$/.test(arg)) {
-          if (seenCount) fail(`${name}: specify one line count.`);
-          const value = arg === '-n' ? args[++index] : arg.slice(1);
-          if (!/^\d+$/.test(value ?? '')) fail(`${name}: line count must be a nonnegative whole number.`);
-          count = Number(value); seenCount = true;
-        } else if (arg.startsWith('-') && arg !== '-') fail(`${name}: unsupported option: ${arg}`);
-        else fileArgs.push(arg);
-      }
-      const data = inputData(shell, fileArgs, input, events, name);
+      const { count, files } = lineArguments(name, args);
+      const data = inputData(shell, files, input, events, name);
       // Unlike text filters, head and tail preserve a missing final newline.
       const items = data.match(/[^\n]*\n|[^\n]+$/g) ?? [];
       return (name === 'head' ? items.slice(0, count) : count === 0 ? [] : items.slice(-count)).join('');
@@ -583,15 +635,19 @@ async function perform(shell, raw) {
     // Validate and execute on a private copy: a failed pipeline cannot damage evidence.
     const draft = JSON.parse(JSON.stringify(shell));
     const events = [];
-    let output = '';
+    let output = '', sources = [];
     for (const stage of stages) {
       const [name, ...args] = stage.words;
+      const cwd = draft.cwd, eventStart = events.length;
       output = await run(draft, name, args, output, events);
       if (output.length > 131072) fail('Command output is limited to 131,072 text characters. Narrow the input before printing.');
-      events.push({ type: 'command', name, args, output });
+      const details = commandDetails(name, args, cwd);
+      const reads = events.slice(eventStart).filter(event => event.type === 'read').map(event => event.path);
+      sources = [...new Set([...reads, ...(details.stdin ? sources : [])])];
+      events.push({ type: 'command', name, args, output, cwd, sources, usesInput: details.stdin, redirected: Boolean(stage.redirect) });
       if (stage.redirect) {
         writeFile(draft, stage.redirect.path, output, events, stage.redirect.append);
-        output = '';
+        output = ''; sources = [];
       }
     }
     if (Object.keys(draft.files).length > 512 || draft.directories.length > 512) fail('Each lab supports at most 512 files and 512 directories.');
@@ -613,6 +669,26 @@ export async function execute(shell, raw) {
   return next;
 }
 
+function matchesCommand(check, event) {
+  if (!event || event.name !== check.name) return false;
+  const required = asList(check.argsIncludes).map(String);
+  if (required.length) {
+    try {
+      const expected = commandDetails(check.name, required, HOME).facts;
+      const actual = commandDetails(event.name, event.args, event.cwd ?? HOME).facts;
+      // A filter may receive the same verified file via cat and a pipe.
+      (event.sources ?? []).forEach(path => actual.add(`path:${path}`));
+      if ([...expected].some(fact => !actual.has(fact))) return false;
+    } catch { return false; }
+  }
+  return asList(check.outputIncludes).every(value => {
+    const expected = String(value);
+    // Three matching lines must not also accept a count of thirteen.
+    if (check.name === 'wc' && /^\d+$/.test(expected)) return Number(event.output.trim().split(/\s+/)[0]) === Number(expected);
+    return String(event.output).includes(expected);
+  });
+}
+
 /** Completion comes from successful, structured effects, never the typed text. */
 export function matchesObjective(objective, result, shell) {
   if (!objective || !result || result.error || !Array.isArray(result.events)) return false;
@@ -620,8 +696,15 @@ export function matchesObjective(objective, result, shell) {
   const contains = (content, required) => asList(required).every(value => String(content).includes(String(value)));
   const path = check.path ? normalize(shell, check.path) : null;
   switch (check.type) {
-    case 'command':
-      return result.events.some(event => event.type === 'command' && event.name === check.name && asList(check.argsIncludes).every(arg => event.args.includes(String(arg))) && contains(event.output, check.outputIncludes));
+    case 'command': {
+      const commands = result.events.filter(event => event.type === 'command');
+      const preceding = asList(check.pipeline);
+      return commands.some((event, index) => matchesCommand(check, event) && index >= preceding.length &&
+        (!preceding.length || event.usesInput) && preceding.every((requirement, offset) => {
+          const prior = commands[index - preceding.length + offset];
+          return !prior.redirected && (offset === 0 || prior.usesInput) && matchesCommand(requirement, prior);
+        }));
+    }
     case 'read':
       return result.events.some(event => event.type === 'read' && event.path === path && contains(event.content, check.contains));
     case 'write':

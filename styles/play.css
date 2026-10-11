@@ -79,7 +79,7 @@
 .field-toolbar-actions #jump-decision:hover { background: #234d39; }
 .field-toolbar-actions #jump-decision:disabled { color: #e4e6cc; background: #667453; border-color: #667453; }
 .terminal-window .terminal-footer { border-radius: 0 0 11px 11px; }
-.field-return-message {
+.dialog-content > .field-return-message {
   margin: 0 0 18px;
   padding: 12px 15px;
   border: 1px solid #8faa7d;
@@ -91,6 +91,35 @@
   line-height: 1.65;
 }
 .field-return-message strong { color: #f4ddac; }
+
+/* Give the speaker and the full location caption their own space in each story plate. */
+.cinematic-art:has(.speaking-character) {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 14px;
+  max-height: none;
+  padding: 52px 26px 26px;
+}
+.cinematic-art > .speaking-character {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  align-self: flex-end;
+  flex-shrink: 0;
+}
+.cinematic-art > .cinematic-location {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  display: block;
+  flex-shrink: 0;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 520px) {
+  .cinematic-art:has(.speaking-character) { padding: 48px 21px 20px; }
+}
 
 .mission-scene,
 .objectives-card,

@@ -264,6 +264,85 @@ test('objectives check structured effects rather than words typed or stale artif
   assert.equal(matchesObjective({ type: 'decision', value: 'report' }, { error: false, events: [{ type: 'decision', value: 'report' }] }, shell), true);
 });
 
+test('objective credit accepts equivalent supported flags and line counts without weakening requirements', async () => {
+  const logMission = missions.find(mission => mission.id === 'hike-03');
+  const log = createShell(logMission.fixtures);
+  for (const [id, command] of [['head', 'head -2 porch/relay.log'], ['tail', 'tail -2 porch/relay.log']]) {
+    const objective = logMission.objectives.find(item => item.check.name === id);
+    assert.equal(matchesObjective(objective, await success(log, command), log), true, command);
+    assert.equal(matchesObjective(objective, await success(log, command.replace('-2', '-3')), log), false, 'The required line count still matters.');
+  }
+  const permissionMission = missions.find(mission => mission.id === 'hike-07');
+  const permissionShell = createShell(permissionMission.fixtures);
+  const permissions = permissionMission.objectives.find(item => item.check.name === 'ls');
+  for (const command of ['ls -la private', 'ls -al private', 'ls -a -l private', 'ls -l -a private']) {
+    assert.equal(matchesObjective(permissions, await success(permissionShell, command), permissionShell), true, command);
+  }
+  assert.equal(matchesObjective(permissions, await success(permissionShell, 'ls private'), permissionShell), false, 'Names alone do not inspect permissions.');
+  const socketMission = missions.find(mission => mission.id === 'hike-16');
+  const socketShell = createShell(socketMission.fixtures);
+  const sockets = socketMission.objectives.find(item => item.check.name === 'ss');
+  assert.equal(matchesObjective(sockets, await success(socketShell, 'ss -tlnu'), socketShell), true);
+  for (const command of ['grep -v AUTH_FAIL /var/log/auth.log', 'grep -c AUTH_FAIL /var/log/auth.log', 'grep -E AUTH_FAIL /var/log/auth.log', 'ss --unexpected', 'ps -unexpected']) {
+    const rejected = await execute(createShell(FIXTURES), command);
+    assert.equal(rejected.error, true, command);
+    assert.match(rejected.output, /unsupported option|supports/);
+    assert.deepEqual(rejected.events, []);
+  }
+});
+
+test('objective paths follow the executed working directory and accept the same file through a pipe', async () => {
+  const mission = missions.find(item => item.id === 'hike-03');
+  const shell = createShell(mission.fixtures);
+  const objective = mission.objectives.find(item => item.check.name === 'head');
+  assert.equal(matchesObjective(objective, await success(shell, 'head -n 2 /home/trainee/porch/relay.log'), shell), true);
+  await success(shell, 'cd porch');
+  assert.equal(matchesObjective(objective, await success(shell, 'head -n 2 ./relay.log'), shell), true);
+  assert.equal(matchesObjective(objective, await success(shell, 'cat relay.log | head -2'), shell), true);
+  await success(shell, 'cp relay.log lookalike.log');
+  assert.equal(matchesObjective(objective, await success(shell, 'head -2 lookalike.log'), shell), false, 'Identical text from a different file is not the requested evidence.');
+  assert.equal(matchesObjective(objective, await success(shell, 'cat lookalike.log | head -2'), shell), false);
+
+  const routeMission = missions.find(item => item.id === 'hike-04');
+  const routeShell = createShell(routeMission.fixtures);
+  const findRoute = routeMission.objectives.find(item => item.check.name === 'find');
+  assert.equal(matchesObjective(findRoute, await success(routeShell, 'find /home/trainee/supplies -name route.conf'), routeShell), true);
+  await success(routeShell, 'cd supplies/archive');
+  const grepRoute = routeMission.objectives.find(item => item.check.name === 'grep');
+  assert.equal(matchesObjective(grepRoute, await success(routeShell, 'grep route= route.conf'), routeShell), true);
+  assert.equal(matchesObjective(grepRoute, await success(routeShell, 'cat route.conf | grep route='), routeShell), true);
+  assert.equal(matchesObjective(grepRoute, await success(routeShell, 'grep academy.test route.conf'), routeShell), false, 'The requested filter still matters.');
+});
+
+test('pipeline objectives require the correct immediately preceding evidence, not a matching number', async () => {
+  const mission = missions.find(item => item.id === 'hike-21');
+  const shell = createShell(mission.fixtures);
+  const objective = mission.objectives.find(item => item.check.name === 'wc');
+  await success(shell, 'echo "AUTH_FAIL outside-policy\nAUTH_FAIL second\nAUTH_FAIL third" > unrelated.txt');
+  for (const command of [
+    'wc -l unrelated.txt',
+    'cat unrelated.txt | wc -l',
+    'grep AUTH_FAIL unrelated.txt | wc -l',
+    'grep AUTH_FAIL logs/auth.log | wc -l unrelated.txt',
+    'echo "AUTH_FAIL outside-policy\nAUTH_FAIL second\nAUTH_FAIL third" | grep AUTH_FAIL | wc -l',
+    'cat logs/auth.log | echo "AUTH_FAIL outside-policy\nAUTH_FAIL second\nAUTH_FAIL third" | grep AUTH_FAIL | wc -l',
+    'grep AUTH_FAIL logs/auth.log | cat unrelated.txt | wc -l',
+  ]) {
+    assert.equal(matchesObjective(objective, await success(shell, command), shell), false, command);
+  }
+  await success(shell, 'grep AUTH_FAIL logs/auth.log');
+  assert.equal(matchesObjective(objective, await success(shell, 'wc -l unrelated.txt'), shell), false, 'An earlier command is not a pipeline.');
+  for (const command of ['grep AUTH_FAIL logs/auth.log | wc -l', 'cat logs/auth.log | grep AUTH_FAIL | wc -l']) {
+    assert.equal(matchesObjective(objective, await success(shell, command), shell), true, command);
+  }
+  await success(shell, 'cd logs');
+  assert.equal(matchesObjective(objective, await success(shell, 'grep AUTH_FAIL ./auth.log | wc -l'), shell), true);
+  for (let index = 0; index < 10; index++) await success(shell, 'echo "AUTH_FAIL extra-event" >> auth.log');
+  const thirteen = await success(shell, 'grep AUTH_FAIL auth.log | wc -l');
+  assert.equal(thirteen.output, '13\n');
+  assert.equal(matchesObjective(objective, thirteen, shell), false, 'A count of thirteen does not establish three events.');
+});
+
 test('failed pipelines roll back directory, mode and file changes together', async () => {
   const shell = createShell(FIXTURES);
   const files = JSON.stringify(shell.files), directories = [...shell.directories];

@@ -66,8 +66,12 @@ The visual direction uses expressive display lettering, deep forest and petrol a
 
 Commands work on fictional files and documented lab responses. They never execute on the player’s operating system or reach real networks. The shell supports a teaching subset, not a complete Linux implementation: no arbitrary scripts, shell expansion, package installation, or real service configuration. Failed pipelines restore their starting state so a learning mistake cannot destroy mission evidence; this is more forgiving than a real shell.
 
+Objective credit follows supported command effects, including equivalent grouped flags, `head -2` versus `head -n 2`, absolute paths, and paths relative to the folder you entered. Tasks about a pipeline also verify which evidence reached the next command; an unrelated file with the same line count cannot complete the log investigation.
+
 Completing the trail demonstrates the game’s exercises, not professional certification or independent operational readiness. Follow up in an authorized isolated lab and beginner playtesting before treating a skill as mastered.
 
 ## Next, once the trail feels right
 
 Refine the foundation with observed beginner feedback, add optional audio, and verify more browsers. The [learning pace review](docs/PLAYTEST.md) records the content audit and the sessions still to run. Then build Office scenarios around everyday workplace needs. Night Shift follows with realistic priorities and time constraints. Keep the story, the terminal, and the reason for each action connected.
+
+The [current product review](docs/PREMIUM_REVIEW.md) separates historical V4 feedback from current findings and prioritises independent practice, returning review cases, varied investigations, and reading comfort.
