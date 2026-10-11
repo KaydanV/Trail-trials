@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { missions } from '../src/curriculum.js';
+import { getHint } from '../src/coach.js';
+import { createPracticeMission } from '../src/practice.js';
 
 // Drive the public UI with curriculum solutions. Never edit saves or application state.
 const baseURL = process.env.TRAILS_URL || 'http://127.0.0.1:4173';
@@ -231,6 +233,273 @@ async function objectiveStatus() {
   return page.locator('[data-testid^="objective-"]').evaluateAll(elements => elements.map(element => element.dataset.complete === 'true'));
 }
 
+async function worldSnapshot() {
+  return page.locator('#app .world-reactor').evaluate(element => ({
+    kind: element.dataset.kind,
+    phase: element.dataset.phase,
+    stage: element.dataset.stage,
+    verified: element.dataset.verified,
+    figurePhase: element.closest('figure').dataset.worldPhase,
+    bits: [...element.querySelectorAll('[data-world-task]')].map(bit => ({
+      objective: bit.dataset.worldTask,
+      revealed: bit.dataset.revealed,
+    })),
+  }));
+}
+
+async function assertWorldMatchesEvidence(mission, completed = false) {
+  const reactor = page.locator('#app .world-reactor');
+  assert.equal(await reactor.locator('svg').evaluate(element => element.namespaceURI), 'http://www.w3.org/2000/svg', 'The living scene contains an actual SVG illustration');
+  assert.ok(await reactor.locator('path, circle, rect, line, polygon, polyline, ellipse').count() > 3, 'The living illustration contains drawn objects');
+  const statuses = await objectiveStatus();
+  const world = await worldSnapshot();
+  assert.equal(world.figurePhase, world.phase, 'The illustrated location and reactor describe the same state');
+  for (const [index, objective] of mission.objectives.entries()) {
+    const bits = world.bits.filter(bit => bit.objective === objective.id);
+    assert.ok(bits.length > 0, `The living illustration depicts ${objective.id}`);
+    assert.ok(bits.every(bit => bit.revealed === String(statuses[index])), `Only verified ${objective.id} evidence reveals its drawn objects`);
+  }
+  assert.ok(world.bits.filter(bit => bit.objective === 'complete').every(bit => bit.revealed === String(completed)), 'Restoration waits for the successful knowledge check');
+  await page.waitForFunction(() => [...document.querySelectorAll('#app .world-reactor [data-world-task]')].every(bit => {
+    const style = getComputedStyle(bit);
+    return bit.dataset.revealed === 'true'
+      ? style.visibility === 'visible' && style.display !== 'none' && Number(style.opacity) > 0.05
+      : style.visibility === 'hidden' && Number(style.opacity) === 0;
+  }), null, { timeout: 5000 });
+  return world;
+}
+
+async function assertCurrentClue(mission) {
+  const statuses = await objectiveStatus();
+  const objective = mission.objectives.find((_, index) => !statuses[index]);
+  if (objective) {
+    assert.ok((await page.locator('#current-objective').innerText()).includes(objective.label), 'The field toolbar names the next unfinished clue');
+    assert.ok((await page.locator('#current-objective-detail').innerText()).includes(objective.detail), 'The current clue explains the next evidence to collect');
+  }
+}
+
+async function expectedHint(mission, strength = 0) {
+  return getHint(mission, { tasks: await objectiveStatus() }, strength).text;
+}
+
+async function assertMobileFieldControls(mission) {
+  await page.setViewportSize({ width: 390, height: 900 });
+  const before = await objectiveStatus();
+  const world = await worldSnapshot();
+  const hints = await page.locator('#hint-button').innerText();
+  const hintText = await page.locator('#hint-text').innerText();
+  const destinations = {
+    scene: '.mission-scene',
+    objectives: '.objectives-card',
+    terminal: '.terminal-window',
+    decision: '.decision-card',
+    patch: '.hint-companion',
+  };
+  async function jump(button, target, keyboard = false) {
+    await button.waitFor({ state: 'visible' });
+    if (keyboard) {
+      await button.focus();
+      await button.press('Enter');
+    } else await button.click();
+    assert.ok(await page.locator(destinations[target]).evaluate(element => element === document.activeElement || element.contains(document.activeElement)), `Jumping to ${target} moves keyboard focus into that section`);
+    await assertNoOverflow(`Mobile jump to ${target}`);
+    await assertCurrentClue(mission);
+  }
+  for (const [button, target] of [['#jump-clues', 'objectives'], ['#jump-patch', 'patch'], ['#jump-decision', 'decision']]) {
+    await jump(page.locator(button), target, true);
+  }
+  for (const target of ['scene', 'objectives', 'decision', 'terminal']) {
+    await jump(page.locator(`.mobile-field-nav button[data-target="${target}"]`), target);
+  }
+  assert.equal(await ui('terminal-input').evaluate(element => document.activeElement === element), true, 'The mobile terminal shortcut focuses command entry');
+  assert.deepEqual(await objectiveStatus(), before, 'Moving around a mission awards no clue evidence');
+  assert.deepEqual(await worldSnapshot(), world, 'Mobile navigation never advances the illustrated world');
+  assert.equal(await page.locator('#hint-button').innerText(), hints, 'Jumping to Patch consumes no hint');
+  assert.equal(await page.locator('#hint-text').innerText(), hintText, 'Mobile moves preserve the clue strength for the current objective');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+}
+
+async function exportJourney(label) {
+  await click('settings');
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('#export-save').click();
+  const download = await downloadPromise;
+  const path = new URL(`${label}.json`, results).pathname;
+  await download.saveAs(path);
+  await page.keyboard.press('Escape');
+  return { path, profile: JSON.parse(await readFile(path, 'utf8')) };
+}
+
+function canonicalProgress(profile) {
+  return {
+    currentMission: profile.currentMission,
+    completed: profile.completed,
+    notes: profile.notes,
+    scores: profile.scores,
+    sessions: profile.sessions,
+  };
+}
+
+async function finishPractice(mission) {
+  assert.ok((await objectiveStatus()).every(Boolean), 'Practice also requires every evidence objective');
+  await click('debrief');
+  assert.ok(await ui('complete-mission').isDisabled(), 'A practice case still requires its knowledge check');
+  const beforeQuiz = await worldSnapshot();
+  await click(`quiz-${(mission.quiz.answer + 1) % mission.quiz.options.length}`);
+  assert.ok(await ui('complete-mission').isDisabled(), 'An incorrect practice answer cannot finish the case');
+  assert.deepEqual(await worldSnapshot(), beforeQuiz, 'An incorrect practice answer cannot restore the illustrated scene');
+  await click(`quiz-${mission.quiz.answer}`);
+  await page.locator('#reflection').fill('A note for this practice case only.');
+  await click('complete-mission');
+  await assertWorldMatchesEvidence(mission, true);
+  await page.keyboard.press('Escape');
+  await page.locator('.practice-banner').waitFor({ state: 'visible' });
+}
+
+async function exercisePractice() {
+  for (const [index, mission] of missions.entries()) {
+    await page.locator(`.trail-node[data-mission="${index}"]`).click();
+    assert.equal(await visible('practice-mission'), true, `Completed stop ${index + 1} offers optional practice`);
+    assert.ok((await objectiveStatus()).every(Boolean), `Visiting completed ${mission.id} preserves its canonical evidence`);
+  }
+  await page.locator('.trail-node[data-mission="0"]').click();
+  const firstBaseline = await exportJourney('canonical-before-practice');
+  const xp = await page.locator('.xp-badge').innerText();
+  const unlocked = await page.locator('.trail-node:not([disabled])').count();
+  const first = createPracticeMission(missions[0], 1);
+  const second = createPracticeMission(missions[0], 2);
+  assert.notDeepEqual(first.solutions, missions[0].solutions, 'Practice uses fresh evidence and commands');
+  assert.notDeepEqual(second.solutions, first.solutions, 'Another practice case changes the evidence again');
+  await click('practice-mission');
+  await enterMission();
+  assert.match(await ui('practice-variant').innerText(), /\b1\b/, 'The first remix identifies its case number');
+  assert.ok((await objectiveStatus()).every(status => !status), 'Practice starts with independent unfinished objectives');
+  const firstWorld = await assertWorldMatchesEvidence(first);
+  await runCommand(missions[0].solutions.at(-1));
+  assert.deepEqual(await worldSnapshot(), firstWorld, 'A memorized canonical filename cannot reveal practice evidence');
+  assert.ok((await objectiveStatus()).every(status => !status), 'Practice requires reading this case’s changed evidence');
+  await runCommand(first.solutions[0], true);
+  const partial = await objectiveStatus();
+  await assertCurrentClue(first);
+  const partialSave = await exportJourney('practice-partial');
+  assert.deepEqual(canonicalProgress(partialSave.profile), canonicalProgress(firstBaseline.profile), 'Practice commands leave canonical files, clues, notes, scores, and progression unchanged');
+  assert.equal(partialSave.profile.practiceSessions[first.id].variant, 1, 'The public backup contains the active practice variant');
+  assert.deepEqual(partialSave.profile.practiceSessions[first.id].session.tasks, partial, 'Practice evidence saves separately from canonical objectives');
+
+  await page.reload({ waitUntil: 'networkidle' });
+  if (await visible('start-journey')) await click('start-journey');
+  await enterMission();
+  if (!(await page.locator('.practice-banner').isVisible())) await click('practice-mission');
+  await enterMission();
+  assert.match(await ui('practice-variant').innerText(), /\b1\b/, 'Reload resumes the saved practice case');
+  assert.deepEqual(await objectiveStatus(), partial, 'Reload retains independent practice evidence');
+  await page.locator('#hint-button').click();
+  assert.equal(await page.locator('.patch-speech').innerText(), await expectedHint(first), 'Patch follows unfinished evidence in a remixed case');
+  await page.locator('#hint-button').click();
+  assert.equal(await page.locator('.patch-speech').innerText(), await expectedHint(first, 1), 'Another request deepens the clue for the same unfinished objective');
+  const beforeInvalid = await worldSnapshot();
+  await runCommand('warp practice');
+  assert.deepEqual(await worldSnapshot(), beforeInvalid, 'An invalid practice command reveals no drawn evidence');
+  assert.equal(await page.locator('#hint-text').innerText(), await expectedHint(first, 1), 'A failed command preserves the current clue strength');
+  await runCommand(first.solutions[1], true);
+  await page.locator('#hint-button').click();
+  assert.equal(await page.locator('.patch-speech').innerText(), await expectedHint(first), 'Verified practice evidence resets clue strength for the next objective');
+  for (const command of first.solutions.slice(2)) await runCommand(command, true);
+  await chooseDecision(first, true);
+  await finishPractice(first);
+  const firstComplete = await exportJourney('practice-first-complete');
+  assert.equal(firstComplete.profile.practiceSessions[first.id].completed, true, 'Completing a practice case persists its own completion');
+  assert.equal(firstComplete.profile.practiceSessions[first.id].note, 'A note for this practice case only.', 'Practice reflection saves with its own case');
+  assert.deepEqual(canonicalProgress(firstComplete.profile), canonicalProgress(firstBaseline.profile), 'Completing practice grants no canonical score, XP, reflection, or completion');
+
+  await click('practice-next');
+  await enterMission();
+  assert.match(await ui('practice-variant').innerText(), /\b2\b/, 'New case advances to another practice variant');
+  assert.ok((await objectiveStatus()).every(status => !status), 'Another case clears only its own practice evidence');
+  const secondWorld = await assertWorldMatchesEvidence(second);
+  await runCommand(first.solutions.at(-1));
+  assert.deepEqual(await worldSnapshot(), secondWorld, 'The previous case’s answer cannot advance a fresh case');
+  await runCommand(second.solutions.at(-1), true);
+  assert.ok((await objectiveStatus()).some(Boolean), 'The fresh filename verifies this practice case');
+  await assertCurrentClue(second);
+  await screenshot('practice-remix', 390);
+  await screenshot('practice-remix', 320);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.locator('#hint-button').click();
+  await page.locator('#restart-mission').click();
+  await page.locator('#confirm-restart').click();
+  await enterMission();
+  assert.match(await ui('practice-variant').innerText(), /\b2\b/, 'Restart keeps the same practice case');
+  assert.ok((await objectiveStatus()).every(status => !status), 'Practice restart clears only this case’s evidence');
+  assert.doesNotMatch(await page.locator('#hint-button').innerText(), /\(\d+\)/, 'Practice restart clears its own hint count');
+  await runCommand(second.solutions.at(-1), true);
+  await click('practice-exit');
+  const secondPartial = await exportJourney('practice-second-partial');
+  assert.equal(secondPartial.profile.practiceSessions[first.id].variant, 2, 'The second case saves independently of canonical progress');
+  assert.equal(secondPartial.profile.practiceSessions[first.id].completed, false, 'Partial practice is never reported as complete');
+  assert.deepEqual(canonicalProgress(secondPartial.profile), canonicalProgress(firstBaseline.profile), 'Exiting practice restores the untouched canonical stop');
+
+  const finalIndex = missions.length - 1;
+  await page.locator(`.trail-node[data-mission="${finalIndex}"]`).click();
+  const finalBaseline = await exportJourney('canonical-before-final-practice');
+  const final = createPracticeMission(missions[finalIndex], 1);
+  assert.notDeepEqual(final.solutions, missions[finalIndex].solutions, 'The later capstone also has changed practice evidence');
+  await click('practice-mission');
+  await enterMission();
+  await assertWorldMatchesEvidence(final);
+  for (const command of final.solutions) {
+    await runCommand(command, true);
+    await assertWorldMatchesEvidence(final);
+    await assertCurrentClue(final);
+  }
+  await chooseDecision(final, true);
+  await finishPractice(final);
+  await click('practice-exit');
+  const finalSave = await exportJourney('practice-final-complete');
+  assert.equal(finalSave.profile.practiceSessions[final.id].completed, true, 'Later practice completion is saved separately');
+  assert.deepEqual(canonicalProgress(finalSave.profile), canonicalProgress(finalBaseline.profile), 'Later practice leaves all canonical achievements and scores unchanged');
+  for (const index of [7, 17]) {
+    const base = missions[index];
+    const remixed = createPracticeMission(base, 2);
+    const originalChoice = base.decision.options.find(option => option.correct);
+    const newChoice = remixed.decision.options.find(option => option.correct);
+    assert.notEqual(newChoice.id, originalChoice.id, `${base.id} changes its evidence-backed practice decision`);
+    await page.locator(`.trail-node[data-mission="${index}"]`).click();
+    const baseline = await exportJourney(`${base.id}-canonical-before-flipped-practice`);
+    await click('practice-mission');
+    await click('practice-next');
+    await enterMission();
+    assert.match(await ui('practice-variant').innerText(), /\b2\b/, `${base.id} identifies its second practice case`);
+    assert.equal(await ui(`decision-${newChoice.id}`).innerText(), newChoice.label, 'The decision options follow current practice evidence');
+    for (const command of remixed.solutions) {
+      await runCommand(command, true);
+      await assertWorldMatchesEvidence(remixed);
+      await assertCurrentClue(remixed);
+    }
+    if (index === 7) {
+      assert.equal(await page.locator('.world-bit[data-world-task="reuse"] .world-warning').count(), 0, 'A healthy practice account is not illustrated as password reuse');
+      assert.ok(await page.locator('.world-bit[data-world-task="reuse"] .world-tick').count() > 0, 'The healthy practice audit shows a verified control');
+    } else {
+      assert.ok(await page.locator('.world-fingerprint-mismatch').count() > 0, 'The differing practice hash has an actual changed fingerprint drawing');
+    }
+    await chooseDecision(remixed, true);
+    await finishPractice(remixed);
+    await click('practice-exit');
+    const saved = await exportJourney(`${base.id}-flipped-practice-complete`);
+    assert.equal(saved.profile.practiceSessions[base.id].completed, true, 'A changed practice decision can complete through the public UI');
+    assert.deepEqual(canonicalProgress(saved.profile), canonicalProgress(baseline.profile), 'Changed practice decisions preserve every canonical achievement');
+  }
+  const allPractice = await exportJourney('all-practice-cases');
+  assert.equal(await page.locator('.xp-badge').innerText(), xp, 'Practice grants no additional XP');
+  assert.equal(await page.locator('.trail-node:not([disabled])').count(), unlocked, 'Practice changes no canonical unlocks');
+  await click('home');
+  await assertLockedChapter('chapter-office');
+  await assertLockedChapter('chapter-night');
+  await click('start-journey');
+  await enterMission();
+  return allPractice.profile.practiceSessions;
+}
+
 async function chooseDecision(mission, probeWrong = false) {
   if (!mission.decision) return;
   const { options } = mission.decision;
@@ -238,10 +507,13 @@ async function chooseDecision(mission, probeWrong = false) {
   if (probeWrong) {
     const wrong = options.find(option => option.id !== correct);
     const before = await objectiveStatus();
+    const world = await worldSnapshot();
     await click(`decision-${wrong.id}`);
     assert.deepEqual(await objectiveStatus(), before, 'An unsafe decision does not satisfy the objective');
+    assert.deepEqual(await worldSnapshot(), world, 'An unsafe decision does not advance the living illustration');
   }
   await click(`decision-${correct}`);
+  await assertWorldMatchesEvidence(mission);
 }
 
 async function finishMission(mission, index, probeWrong = false) {
@@ -253,13 +525,16 @@ async function finishMission(mission, index, probeWrong = false) {
   assert.ok(await ui('complete-mission').isDisabled(), 'The knowledge check gates completion');
   if (probeWrong) {
     const wrong = (mission.quiz.answer + 1) % mission.quiz.options.length;
+    const beforeQuiz = await worldSnapshot();
     await click(`quiz-${wrong}`);
     assert.ok(await ui('complete-mission').isDisabled(), 'An incorrect knowledge answer cannot clear a mission');
+    assert.deepEqual(await worldSnapshot(), beforeQuiz, 'An incorrect knowledge answer cannot advance the living scene');
   }
   await click(`quiz-${mission.quiz.answer}`);
   assert.ok(await ui('complete-mission').isEnabled(), 'The correct answer unlocks completion');
   if (index === 0) await page.locator('#reflection').fill(reflection);
   await click('complete-mission');
+  await assertWorldMatchesEvidence(mission, true);
   assert.equal(await page.locator('.result-stats > div').last().locator('strong').innerText(), `${index + 1}/24`, `Mission ${index + 1} is saved as complete`);
   assert.equal(await page.locator('.result-stars').getAttribute('aria-label'), `${index === 0 ? 2 : 3} out of 3 stars`, 'Hint use affects the practice score without blocking progress');
 }
@@ -303,8 +578,12 @@ try {
   await enterMission();
 
   assert.ok(await ui('debrief').isDisabled(), 'Unfinished evidence cannot open a debrief');
+  assert.equal(await visible('practice-mission'), false, 'An unfinished mission offers no optional practice variant');
+  await assertCurrentClue(missions[0]);
+  const unverifiedWorld = await assertWorldMatchesEvidence(missions[0]);
   await click(`decision-${missions[0].decision.options.find(option => option.correct).id}`);
   assert.ok((await objectiveStatus()).every(status => !status), 'Guessing the right decision before collecting evidence awards no objectives');
+  assert.deepEqual(await worldSnapshot(), unverifiedWorld, 'A guessed decision cannot light or repair an unverified scene');
   await ui('terminal-input').fill('who');
   await ui('terminal-input').press('Tab');
   assert.equal(await ui('terminal-input').inputValue(), 'whoami', 'Tab completes a supported command');
@@ -321,10 +600,12 @@ try {
   await ui('setting-untimed').uncheck();
   assert.equal(await page.locator('body').getAttribute('data-motion'), 'off', 'Motion preference disables animated scenes');
   await page.keyboard.press('Escape');
-  assert.match(await page.locator('#session-timer').innerText(), /Challenge mode/, 'The optional challenge preference updates the visible timer');
+  assert.match(await page.locator('#session-timer').innerText(), /personal.best|timed|challenge/i, 'The optional timing preference updates the visible learning clock');
 
+  const beforeUnknownCommand = await worldSnapshot();
   await runCommand('warp drive');
   assert.ok((await objectiveStatus()).every(status => !status), 'Unknown commands do not award learning objectives');
+  assert.deepEqual(await worldSnapshot(), beforeUnknownCommand, 'An invalid command cannot advance the living illustration');
   await runCommand("echo '<img src=x onerror=alert(1)>'");
   assert.equal(await page.locator('#terminal-output img').count(), 0, 'Terminal user text cannot create HTML elements');
   await ui('terminal-input').press('ArrowUp');
@@ -335,12 +616,17 @@ try {
   assert.notEqual(await page.locator('#hint-text').innerText(), originalHint, 'Patch provides a useful hint');
   assert.equal(await page.locator('.hint-companion').getAttribute('data-emotion'), 'hint', 'Asking for help changes Patch’s expression');
   assert.equal(await page.locator('.patch-speech').getAttribute('role'), 'status', 'Patch’s reply is announced accessibly');
-  assert.equal(await page.locator('.patch-speech').innerText(), missions[0].hints[0], 'Patch delivers the first hint');
+  assert.equal(await page.locator('.patch-speech').innerText(), await expectedHint(missions[0]), 'Patch guides the first unfinished objective');
   assert.ok((await objectiveStatus()).every(status => !status), 'Hints guide learning without awarding objective evidence');
+  assert.deepEqual(await worldSnapshot(), beforeUnknownCommand, 'Asking Patch never changes the illustrated evidence');
 
   await page.setViewportSize({ width: 390, height: 900 });
+  await assertCurrentClue(missions[0]);
   await runCommand(missions[0].solutions[0], true, true);
   await assertNoOverflow('Mobile terminal interaction');
+  await assertCurrentClue(missions[0]);
+  const firstVerifiedWorld = await assertWorldMatchesEvidence(missions[0]);
+  assert.notDeepEqual(firstVerifiedWorld, unverifiedWorld, 'Verified evidence visibly changes the SVG scene');
   await page.setViewportSize({ width: 1440, height: 1000 });
   const partialObjectives = await objectiveStatus();
   assert.ok(partialObjectives.some(Boolean), 'A valid command completes its matching objective');
@@ -349,6 +635,8 @@ try {
   assert.equal(await visible('tour-next'), false, 'A completed guide is remembered when the journey resumes');
   await enterMission();
   assert.deepEqual(await objectiveStatus(), partialObjectives, 'Reload preserves in-progress objective evidence');
+  assert.deepEqual(await worldSnapshot(), firstVerifiedWorld, 'Reload restores the drawn evidence state');
+  await assertCurrentClue(missions[0]);
   assert.match(await page.locator('#hint-button').innerText(), /\(1\)/, 'Reload retains the number of hints used');
   await click('settings');
   assert.equal(await ui('setting-motion').isChecked(), false, 'Motion preference survives reload');
@@ -373,18 +661,49 @@ try {
   assert.match(await page.locator('#hint-button').innerText(), /\(1\)/, 'A companion check-in consumes no hint');
   assert.deepEqual(await objectiveStatus(), hintEvidence, 'A companion check-in awards no objective');
   await page.locator('#hint-button').click();
-  assert.equal(await page.locator('.patch-speech').innerText(), missions[0].hints[1], 'A second request provides the next hint');
+  assert.equal(await page.locator('.patch-speech').innerText(), await expectedHint(missions[0]), 'New evidence resets Patch to a gentle clue for the next unfinished objective');
+  assert.match(await page.locator('#hint-button').innerText(), /\(2\)/, 'Resetting clue strength preserves the total hints used');
   assert.equal(await page.locator('.hint-companion').getAttribute('data-emotion'), 'hint', 'Patch reacts to a second hint request');
   assert.deepEqual(await objectiveStatus(), hintEvidence, 'Graduated hints still require the player to collect evidence');
+  await assertMobileFieldControls(missions[0]);
   await assertDialogKeyboard('notebook');
-  for (const width of [1440, 768, 390]) await screenshot('mission', width);
+  for (const width of [1440, 768, 390, 360, 320]) {
+    await screenshot('mission', width);
+    if (width < 800) {
+      const toolbar = page.locator('.field-toolbar');
+      await toolbar.scrollIntoViewIfNeeded();
+      await assertOnscreen(toolbar, `Current clue toolbar at ${width}px`);
+      for (const id of ['#jump-clues', '#jump-patch', '#jump-decision']) {
+        const box = await page.locator(id).boundingBox();
+        assert.ok(box && box.width >= 44 && box.height >= 44, `${id} provides a comfortable touch target at ${width}px`);
+      }
+    }
+  }
   await page.setViewportSize({ width: 1440, height: 1000 });
 
   for (let index = 0; index < missions.length; index++) {
     const mission = missions[index];
     await assertMissionArtwork(index);
+    await assertWorldMatchesEvidence(mission);
+    await assertCurrentClue(mission);
+    assert.equal(await visible('practice-mission'), false, `Unfinished stop ${index + 1} cannot start optional practice`);
     assert.equal(await page.locator('.trail-node:not([disabled])').count(), index + 1, `Mission ${index + 1} unlocks after its predecessor`);
-    for (const command of mission.solutions.slice(index === 0 ? 1 : 0)) await runCommand(command, true);
+    for (const command of mission.solutions.slice(index === 0 ? 1 : 0)) {
+      const statuses = await objectiveStatus();
+      const next = mission.objectives.find((_, objective) => !statuses[objective]);
+      if ([18, 19, 22].includes(index) && next?.check.type === 'write') {
+        for (const width of [390, 320]) {
+          await screenshot(`mission-${index + 1}-field-note`, width);
+          await page.locator('.field-toolbar').scrollIntoViewIfNeeded();
+          await assertOnscreen(page.locator('.field-toolbar'), `Long current clue in mission ${index + 1} at ${width}px`);
+          await assertCurrentClue(mission);
+        }
+        await page.setViewportSize({ width: 1440, height: 1000 });
+      }
+      await runCommand(command, true);
+      await assertWorldMatchesEvidence(mission);
+      await assertCurrentClue(mission);
+    }
     if (index === 1) {
       const evidence = await objectiveStatus();
       await page.reload({ waitUntil: 'networkidle' });
@@ -431,6 +750,10 @@ try {
   await assertLockedChapter('chapter-night');
   assert.match(await ui('foundation-status').innerText(), /24\s*[/]\s*24|complete|100%/i, 'The foundation reaches completion');
   await screenshot('foundation-complete', 1440);
+  await click('start-journey');
+  await enterMission();
+  const practiceSessions = await exercisePractice();
+  await click('home');
   for (const slot of [2, 3]) {
     await click(`slot-${slot}`);
     await click('start-journey');
@@ -440,6 +763,9 @@ try {
     await enterMission();
     assert.ok((await objectiveStatus()).every(status => !status), `Slot ${slot} starts with independent objective progress`);
     assert.match(await page.locator('.trail-progress > p').innerText(), /0\s*[/]\s*24/, `Slot ${slot} has no completed missions`);
+    assert.equal(await visible('practice-mission'), false, `Fresh journey ${slot} cannot inherit another slot’s practice unlock`);
+    const freshSave = await exportJourney(`fresh-slot-${slot}`);
+    assert.deepEqual(freshSave.profile.practiceSessions, {}, `Slot ${slot} has no practice files or evidence from another journey`);
     await click('home');
     if (slot === 2) {
       await click('start-journey');
@@ -477,6 +803,8 @@ try {
   await click('notebook');
   assert.equal(await page.locator('.notebook-note p').innerText(), reflection, 'Imported backups retain reflections');
   await page.keyboard.press('Escape');
+  const importedPractice = await exportJourney('imported-practice');
+  assert.deepEqual(importedPractice.profile.practiceSessions, practiceSessions, 'The public export and import flow preserves every independent practice case');
 
   // Simulate a pre-tutorial V5 export by omitting only the newly optional preference.
   // All completed missions, sessions, files, scores, and notes stay exactly as exported.
@@ -507,7 +835,7 @@ try {
   assert.deepEqual(unexpectedDialogs, [], 'User terminal text does not invoke browser dialogs');
   assert.deepEqual(resourceErrors, [], 'All requested local game resources load successfully');
   await rm(new URL('failure.png', results), { force: true });
-  console.log('Browser regression passed: 24 missions, guided tutorial, matching scenes and speakers, interactive Patch hints, local fonts, progression gates, save/resume, independent profiles, backups, accessibility, and responsive layouts.');
+  console.log('Browser regression passed: 24 canonical missions, verified SVG scenes, objective-aware Patch, mobile jump focus and 320–1440px layouts, changing practice cases, independent canonical/practice saves, tutorial, profiles, backups, and progression gates.');
 } catch (error) {
   await page.screenshot({ path: new URL('failure.png', results).pathname, fullPage: true }).catch(() => {});
   throw error;

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProgress, normalizeProgress, createStorage, SaveError, MAX_SAVE_BYTES } from '../src/storage.js';
+import { missions as curriculumMissions } from '../src/curriculum.js';
+import { createShell } from '../src/engine.js';
+import { createPracticeMission, MAX_PRACTICE_VARIANT } from '../src/practice.js';
 
 const missions = [{ id: 'arrival', objectives: [{}, {}] }, { id: 'archive', objectives: [{}] }, { id: 'signal', objectives: [{}] }];
 const key = slot => `terminal-trails-v5-slot-${slot}`;
@@ -21,7 +24,8 @@ function session() {
       files: { '/home/trainee/report.txt': { content: 'Evidence preserved.\n', mode: '600', mtime: 0 } },
       history: ['pwd', 'cat report.txt'], directoryModes: { '/home/trainee': '700' }
     },
-    tasks: [true, false], started: true, commands: 2, hints: 0, elapsed: 12.5
+    tasks: [true, false], started: true, commands: 2, hints: 0, elapsed: 12.5,
+    hintState: { targetId: null, depth: 0 }, hintLevel: 0
   };
 }
 function validProgress() {
@@ -86,6 +90,144 @@ test('older V5 settings restore the tutorial without losing existing progress', 
   const imported = saves.import(2, JSON.stringify(original));
   assert.deepEqual({ ...imported, updatedAt: original.updatedAt }, restored);
   assert.equal(JSON.parse(storage.values.get(key(1))).settings.tutorialSeen, undefined);
+});
+
+test('older V5 profiles gain independent practice and hint defaults without rewriting their source', () => {
+  const original = validProgress();
+  delete original.practiceSessions;
+  delete original.sessions.arrival.hintState;
+  delete original.sessions.arrival.hintLevel;
+  original.sessions.arrival.hints = 8;
+  const raw = JSON.stringify(original);
+  const storage = memoryStorage({ [key(1)]: raw });
+  const saves = createStorage(storage, missions);
+  const restored = saves.read(1);
+  assert.deepEqual(restored, {
+    ...original, practiceSessions: {},
+    sessions: { arrival: { ...original.sessions.arrival, hintState: { targetId: null, depth: 0 }, hintLevel: 3 } }
+  });
+  assert.equal(storage.values.get(key(1)), raw);
+  const imported = saves.import(2, raw);
+  assert.deepEqual({ ...imported, updatedAt: restored.updatedAt }, restored);
+});
+
+test('practice shells, completion and reflections round-trip per slot without changing journey credit', () => {
+  const saves = createStorage(memoryStorage(), missions);
+  const original = validProgress();
+  const rehearsal = session();
+  rehearsal.tasks = [true, true];
+  rehearsal.commands = 14;
+  rehearsal.shell.files['/home/trainee/report.txt'].content = 'New practice evidence.\n';
+  const draft = structuredClone(original);
+  draft.practiceSessions.arrival = { variant: 2, session: rehearsal, completed: true, note: '<b>A practice reflection.</b>' };
+  const saved = saves.write(1, draft);
+  for (const field of ['completed', 'currentMission', 'scores', 'notes', 'sessions']) assert.deepEqual(saved[field], original[field]);
+  const imported = saves.import(3, saves.export(1));
+  assert.deepEqual({ ...imported, updatedAt: saved.updatedAt }, saved);
+  saves.write(2, { ...original, practiceSessions: { arrival: { variant: 3, session: session() } } });
+  assert.equal(saves.read(1).practiceSessions.arrival.variant, 2);
+  assert.equal(saves.read(2).practiceSessions.arrival.variant, 3);
+  assert.equal(saves.read(2).practiceSessions.arrival.completed, false);
+  assert.equal(saves.read(2).practiceSessions.arrival.note, '');
+  imported.practiceSessions.arrival.session.shell.files['/home/trainee/report.txt'].content = 'Outside mutation';
+  assert.equal(saves.read(1).practiceSessions.arrival.session.shell.files['/home/trainee/report.txt'].content, 'New practice evidence.\n');
+  assert.equal(saves.read(1).sessions.arrival.shell.files['/home/trainee/report.txt'].content, original.sessions.arrival.shell.files['/home/trainee/report.txt'].content);
+});
+
+test('practice completion for a later lesson grants no canonical completion, score or unlock', () => {
+  const profile = createProgress(missions);
+  const later = session();
+  later.tasks = [true];
+  profile.practiceSessions.signal = { variant: 1, session: later, completed: true };
+  profile.currentMission = 'signal';
+  const normalized = normalizeProgress(profile, missions);
+  assert.equal(normalized.currentMission, 'arrival');
+  assert.deepEqual(normalized.completed, []);
+  assert.deepEqual(normalized.scores, {});
+  assert.deepEqual(normalized.sessions, {});
+  assert.equal(normalized.practiceSessions.signal.completed, true);
+});
+
+test('all generated practice fixture shells and original objective IDs persist in validated sessions', () => {
+  const profile = createProgress(curriculumMissions);
+  for (const base of curriculumMissions) {
+    const practice = createPracticeMission(base, MAX_PRACTICE_VARIANT);
+    profile.practiceSessions[base.id] = {
+      variant: MAX_PRACTICE_VARIANT, completed: false,
+      session: { shell: createShell(practice.fixtures), tasks: practice.objectives.map(() => false), started: true, commands: 0, hints: 2, elapsed: 1, hintState: { targetId: base.objectives[0].id, depth: 1 }, hintLevel: 1 }
+    };
+  }
+  const saves = createStorage(memoryStorage(), curriculumMissions);
+  const saved = saves.write(1, profile);
+  const imported = saves.import(2, saves.export(1));
+  assert.deepEqual({ ...imported, updatedAt: saved.updatedAt }, saved);
+  assert.equal(Object.keys(imported.practiceSessions).length, 24);
+  assert.deepEqual(imported.completed, []);
+});
+
+test('invalid practice wrappers and sessions cannot replace a valid existing save', () => {
+  const saves = createStorage(memoryStorage(), missions);
+  const valid = validProgress();
+  valid.practiceSessions.arrival = { variant: 1, session: session(), completed: false, note: '' };
+  const original = saves.write(1, valid);
+  const mutations = [
+    p => { p.practiceSessions.unknown = p.practiceSessions.arrival; },
+    p => { p.practiceSessions.arrival.variant = 0; },
+    p => { p.practiceSessions.arrival.variant = MAX_PRACTICE_VARIANT + 1; },
+    p => { p.practiceSessions.arrival.variant = 1.5; },
+    p => { p.practiceSessions.arrival.variant = '1'; },
+    p => { delete p.practiceSessions.arrival.variant; },
+    p => { delete p.practiceSessions.arrival.session; },
+    p => { p.practiceSessions.arrival.completed = 'true'; },
+    p => { p.practiceSessions.arrival.completed = null; },
+    p => { p.practiceSessions.arrival.note = null; },
+    p => { p.practiceSessions.arrival.note = 'x'.repeat(2001); },
+    p => { p.practiceSessions.arrival.note = 'invalid\0note'; },
+    p => { p.practiceSessions.arrival.xp = 100; },
+    p => { p.practiceSessions.arrival.session.tasks = [true]; },
+    p => { p.practiceSessions.arrival.session.shell.cwd = '/home/../trainee'; },
+    p => { p.practiceSessions.arrival.session.commands = -1; },
+    p => { p.practiceSessions.arrival.session.shell.files['/home/trainee/report.txt'].content = 'x'.repeat(32769); }
+  ];
+  for (const mutate of mutations) {
+    const draft = structuredClone(valid);
+    mutate(draft);
+    assert.throws(() => saves.import(1, JSON.stringify(draft)), error => error instanceof SaveError);
+    assert.deepEqual(saves.read(1), original);
+  }
+});
+
+test('coach hints validate objective identity and bounded strength in canonical and practice sessions', () => {
+  const course = [{ id: 'arrival', objectives: [{ id: 'location' }, { id: 'decision' }] }];
+  const profile = createProgress(course);
+  profile.sessions.arrival = session();
+  profile.sessions.arrival.hints = 6;
+  profile.sessions.arrival.hintState = { targetId: 'location', depth: 2 };
+  profile.sessions.arrival.hintLevel = 2;
+  profile.practiceSessions.arrival = { variant: 2, session: session() };
+  profile.practiceSessions.arrival.session.hintState = { targetId: 'decision', depth: 3 };
+  assert.equal(normalizeProgress(profile, course).sessions.arrival.hintLevel, 2);
+  assert.equal(normalizeProgress(profile, course).practiceSessions.arrival.session.hintState.targetId, 'decision');
+  const mutations = [
+    s => { s.hintState = null; },
+    s => { s.hintState.targetId = 'other-lesson'; },
+    s => { s.hintState.targetId = false; },
+    s => { s.hintState.depth = -1; },
+    s => { s.hintState.depth = 4; },
+    s => { s.hintState.depth = 1.5; },
+    s => { s.hintState.depth = null; },
+    s => { s.hintState.extra = true; },
+    s => { s.hintLevel = 4; },
+    s => { s.hintLevel = '1'; },
+    s => { s.hintLevel = null; }
+  ];
+  for (const target of ['canonical', 'practice']) {
+    for (const mutate of mutations) {
+      const draft = structuredClone(profile);
+      mutate(target === 'canonical' ? draft.sessions.arrival : draft.practiceSessions.arrival.session);
+      assert.throws(() => normalizeProgress(draft, course), error => error instanceof SaveError && ['INVALID_SAVE', 'UNKNOWN_FIELD'].includes(error.code));
+    }
+  }
 });
 
 test('completed or explicitly skipped tutorial stays remembered across save and export', () => {

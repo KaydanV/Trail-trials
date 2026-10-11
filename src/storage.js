@@ -7,7 +7,7 @@ const ACTIVE_KEY = 'terminal-trails-v5-active-slot';
 const LEGACY_PREFIX = 'terminal-trails-v2-slot-';
 const LEGACY_ACTIVE_KEY = 'terminal-trails-v2-active-slot';
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const PROFILE_KEYS = ['version', 'currentMission', 'completed', 'notes', 'scores', 'settings', 'sessions', 'updatedAt', 'migrationNotice', 'legacyProgress'];
+const PROFILE_KEYS = ['version', 'currentMission', 'completed', 'notes', 'scores', 'settings', 'sessions', 'practiceSessions', 'updatedAt', 'migrationNotice', 'legacyProgress'];
 const encoder = new TextEncoder();
 
 export class SaveError extends Error {
@@ -165,7 +165,7 @@ export function createProgress(missions) {
   const ids = missionList(missions);
   return {
     version: SAVE_VERSION, currentMission: ids[0], completed: [], notes: {}, scores: {},
-    settings: { motion: true, practice: true, tutorialSeen: false }, sessions: {}, updatedAt: new Date().toISOString()
+    settings: { motion: true, practice: true, tutorialSeen: false }, sessions: {}, practiceSessions: {}, updatedAt: new Date().toISOString()
   };
 }
 
@@ -199,18 +199,38 @@ export function normalizeProgress(input, missions) {
     practice: input.settings?.practice === undefined ? true : boolean(input.settings.practice, 'Practice setting'),
     tutorialSeen: input.settings?.tutorialSeen === undefined ? false : boolean(input.settings.tutorialSeen, 'Tutorial setting')
   };
-  result.sessions = missionMap(input.sessions ?? {}, ids, 'Sessions', (value, id) => {
-    allowedKeys(value, ['shell', 'tasks', 'started', 'commands', 'hints', 'elapsed'], 'Mission session');
+  const normalizeSession = (value, id) => {
+    allowedKeys(value, ['shell', 'tasks', 'started', 'commands', 'hints', 'elapsed', 'hintState', 'hintLevel'], 'Mission session');
     const mission = missions[ids.indexOf(id)];
     const objectiveCount = typeof mission === 'object' && Array.isArray(mission.objectives) ? mission.objectives.length : null;
     const maxTasks = objectiveCount ?? (typeof mission === 'object' && Array.isArray(mission.tasks) ? mission.tasks.length : 100);
     const tasks = array(value.tasks ?? [], maxTasks, 'Mission tasks').map(item => boolean(item, 'Task status'));
     if (objectiveCount !== null && tasks.length !== objectiveCount) fail('INVALID_SAVE', `Mission ${id} must contain exactly ${objectiveCount} objective statuses.`);
+    const hints = number(value.hints ?? 0, 10000, 'Session hint count');
+    const hintState = value.hintState === undefined ? { targetId: null, depth: 0 } : value.hintState;
+    allowedKeys(hintState, ['targetId', 'depth'], 'Hint state');
+    const targetId = hintState.targetId ?? null;
+    if (targetId !== null) {
+      text(targetId, 80, 'Hint objective');
+      if (!mission?.objectives?.some(objective => objective.id === targetId)) fail('INVALID_SAVE', 'Hints refer to an unknown mission objective.');
+    }
     return {
       shell: shell(value.shell), tasks, started: boolean(value.started ?? false, 'Session status'),
       commands: number(value.commands ?? 0, 100000, 'Session command count'),
-      hints: number(value.hints ?? 0, 10000, 'Session hint count'),
-      elapsed: number(value.elapsed ?? 0, 31536000, 'Session time', { integer: false })
+      hints, elapsed: number(value.elapsed ?? 0, 31536000, 'Session time', { integer: false }),
+      hintState: { targetId, depth: number(hintState.depth === undefined ? 0 : hintState.depth, 3, 'Hint depth') },
+      hintLevel: number(value.hintLevel === undefined ? Math.min(3, hints) : value.hintLevel, 3, 'Hint level')
+    };
+  };
+  result.sessions = missionMap(input.sessions ?? {}, ids, 'Sessions', normalizeSession);
+  // Practice stores its own shell and objective evidence; it never grants journey credit.
+  result.practiceSessions = missionMap(input.practiceSessions ?? {}, ids, 'Practice sessions', (value, id) => {
+    allowedKeys(value, ['variant', 'session', 'completed', 'note'], 'Practice session');
+    return {
+      variant: number(value.variant, 100000, 'Practice variant', { min: 1 }),
+      session: normalizeSession(value.session, id),
+      completed: value.completed === undefined ? false : boolean(value.completed, 'Practice completion'),
+      note: text(value.note === undefined ? '' : value.note, 2000, 'Practice reflection')
     };
   });
   if (input.updatedAt !== undefined) {

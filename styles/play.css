@@ -1,0 +1,300 @@
+/* Field controls keep the next clue beside the command that will uncover it. */
+.terminal-window {
+  overflow: visible;
+  overflow: clip;
+}
+
+.field-toolbar {
+  position: sticky;
+  top: 12px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #526d59;
+  border-radius: 11px 11px 0 0;
+  background: #eecf8c;
+  color: #244638;
+  box-shadow: 0 5px 12px #031a241c;
+}
+
+.field-toolbar > div:first-child { flex: 1; min-width: 0; }
+.field-toolbar-label {
+  display: block;
+  margin-bottom: 5px;
+  color: #51613f;
+  font-size: 9px;
+  line-height: 1.4;
+  font-weight: 850;
+  letter-spacing: 1.4px;
+}
+
+#current-objective {
+  display: block;
+  color: #244638;
+  font: 750 17px/1.25 var(--display);
+  letter-spacing: -.3px;
+  overflow-wrap: anywhere;
+}
+
+#current-objective-detail {
+  display: block;
+  margin-top: 5px;
+  color: #475a3b;
+  font-size: 11px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.field-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.field-toolbar-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 11px;
+  border: 1px solid #7e8859;
+  border-radius: 6px;
+  background: #fff5dc;
+  color: #315340;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.field-toolbar-actions button:hover { background: #fff9e9; border-color: #355d44; }
+.field-toolbar-actions button:focus-visible { outline: 3px solid #234d43; outline-offset: 2px; }
+.field-toolbar-actions button:disabled { color: #65715a; background: #e3d5ac; border-color: #aaac7e; }
+.field-toolbar-actions #jump-decision { background: #315844; color: #fff4d2; border-color: #315844; }
+.field-toolbar-actions #jump-decision:hover { background: #234d39; }
+.field-toolbar-actions #jump-decision:disabled { color: #e4e6cc; background: #667453; border-color: #667453; }
+.terminal-window .terminal-footer { border-radius: 0 0 11px 11px; }
+.field-return-message {
+  margin: 0 0 18px;
+  padding: 12px 15px;
+  border: 1px solid #8faa7d;
+  border-left: 4px solid #c6dfa6;
+  border-radius: 8px;
+  background: #234d42;
+  color: #e0efd3;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.field-return-message strong { color: #f4ddac; }
+
+.mission-scene,
+.objectives-card,
+.terminal-window,
+.command-guide,
+.hint-companion,
+.decision-card,
+.mission-actions { scroll-margin-top: 20px; }
+
+/* Replays are recognisable wherever a player chooses or works through a stop. */
+.practice-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+  border: 1px solid #8f9c75;
+  border-left: 4px solid #edc46d;
+  border-radius: 9px;
+  background: #173c43;
+  color: #e8efdc;
+}
+
+.practice-banner > div:first-child { min-width: 0; }
+.practice-banner strong { display: block; color: #f3d698; font: 700 18px/1.3 var(--display); }
+.practice-banner p { margin: 5px 0 0; color: #c5d8ce; font-size: 11px; line-height: 1.65; }
+.practice-banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-shrink: 0; }
+.practice-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 1px solid #99aa83;
+  border-radius: 6px;
+  background: #fff3d2;
+  color: #31523c;
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 750;
+  text-decoration: none;
+}
+.practice-action:hover { background: #e7efcf; border-color: #658061; }
+.practice-action:disabled { color: #6c775d; background: #e7e7d1; border-color: #b5bca0; }
+.practice-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: #efd18f;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 750;
+  text-align: left;
+}
+.practice-entry:hover { color: #fff0c4; text-decoration: underline; text-underline-offset: 3px; }
+.practice-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 4px 7px;
+  border: 1px solid #aeb789;
+  border-radius: 5px;
+  background: #f6ebc9;
+  color: #4e6240;
+  font-size: 9px;
+  line-height: 1.5;
+  font-weight: 800;
+  white-space: nowrap;
+}
+#practice-status { color: #e6d5a4; font-size: 11px; line-height: 1.65; }
+#practice-status:empty { display: none; }
+.mobile-field-nav { display: none; }
+
+@media (min-width: 901px) and (max-width: 1150px) {
+  .field-toolbar { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px; }
+  .field-toolbar-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .field-toolbar-actions button { padding-inline: 9px; }
+}
+
+@media (max-width: 900px) {
+  :root { --field-dock-space: calc(80px + env(safe-area-inset-bottom, 0px)); }
+  .brand, .header-nav .nav-button { min-height: 44px; }
+  body:has(.mobile-field-nav) { padding-bottom: var(--field-dock-space); }
+  .game-view { padding-bottom: 44px; }
+  .field-toolbar { top: 8px; align-items: stretch; flex-direction: column; gap: 12px; padding: 14px 15px; }
+  #current-objective { font-size: 16px; }
+  .field-toolbar-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .terminal-output {
+    height: clamp(190px, 32vh, 300px);
+    height: clamp(190px, 32svh, 300px);
+    min-height: 0;
+    max-height: 300px;
+    overscroll-behavior-y: contain;
+  }
+  .terminal-form { min-height: 62px; }
+  .terminal-form input { font-size: 16px; min-height: 44px; }
+  .terminal-form button { min-width: 44px; min-height: 44px; }
+  .terminal-prompt { max-width: 38%; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .command-chip { min-height: 44px; }
+  .hint-actions .button, .hint-actions button { min-height: 44px; }
+  .replay-story, .tour-replay { min-height: 44px; }
+  .mission-scene, .objectives-card, .terminal-window, .command-guide, .hint-companion, .decision-card, .mission-actions {
+    scroll-margin-top: 14px;
+    scroll-margin-bottom: var(--field-dock-space);
+  }
+  .mobile-field-nav {
+    position: fixed;
+    z-index: 80;
+    right: 12px;
+    bottom: 0;
+    left: 12px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    max-width: 540px;
+    margin-inline: auto;
+    padding: 7px 7px calc(7px + env(safe-area-inset-bottom, 0px));
+    border: 1px solid #6c8b79;
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    background: #12343e;
+    box-shadow: 0 -7px 30px #041b2855;
+  }
+  .mobile-field-nav button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+    min-height: 54px;
+    padding: 7px 3px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #c2d9ca;
+    font-size: 10px;
+    font-weight: 750;
+    line-height: 1.25;
+  }
+  .mobile-field-nav button svg { width: 17px; height: 17px; flex-shrink: 0; }
+  .mobile-field-nav button > span:first-child:not(:last-child) { font-size: 16px; line-height: 1; }
+  .mobile-field-nav button:hover { background: #234c4b; color: #f4e8c9; }
+  .mobile-field-nav button[aria-current='location'],
+  .mobile-field-nav button[aria-current='true'],
+  .mobile-field-nav button[data-current='true'],
+  .mobile-field-nav button[data-current='active'] {
+    border-color: #d6bb77;
+    background: #ecd096;
+    color: #244a39;
+  }
+  .mobile-field-nav button:focus-visible { outline: 3px solid #f2d699; outline-offset: -2px; }
+  .mobile-field-nav button:disabled { color: #92aba0; opacity: .75; }
+  body[data-keyboard='true'] .mobile-field-nav,
+  body.dialog-open .mobile-field-nav,
+  body:has(.overlay:not(.hidden)) .mobile-field-nav,
+  body:has(.tutorial-overlay:not(.hidden)) .mobile-field-nav { display: none; }
+  body[data-keyboard='true'] .field-toolbar { position: static; }
+}
+
+@media (max-width: 520px) {
+  .field-toolbar { align-items: stretch; flex-direction: column; gap: 11px; padding: 13px 14px; }
+  .field-toolbar-label { font-size: 8px; letter-spacing: 1.2px; margin-bottom: 4px; }
+  #current-objective { font-size: 15px; }
+  #current-objective-detail { margin-top: 4px; font-size: 11px; line-height: 1.45; }
+  .field-toolbar-actions { display: grid; grid-template-columns: 1fr 1fr 1.3fr; max-width: none; }
+  .field-toolbar-actions button { width: 100%; padding: 8px; font-size: 10px; }
+  .terminal-header { padding: 6px 12px; }
+  .terminal-output { height: clamp(165px, 30vh, 265px); height: clamp(165px, 30svh, 265px); padding: 13px 14px; font-size: 11px; }
+  .terminal-form { gap: 7px; padding: 7px 10px 7px 12px; }
+  .terminal-footer { padding-inline: 12px; }
+  .practice-banner { flex-direction: column; align-items: stretch; gap: 12px; padding: 15px; }
+  .practice-banner-actions { width: 100%; }
+  .practice-banner-actions .practice-action { flex: 1; }
+}
+
+@media (max-width: 380px) {
+  .site-header { padding-inline: 12px; gap: 6px; }
+  .mobile-field-nav { left: 8px; right: 8px; }
+  .field-toolbar { padding-inline: 12px; }
+  .terminal-prompt { max-width: 32%; font-size: 9px; }
+}
+
+@media (max-width: 340px) {
+  .brand { gap: 6px; }
+  .brand-name { font-size: 14px; letter-spacing: -1px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html, .terminal-output { scroll-behavior: auto; }
+}
+body[data-motion='off'] { scroll-behavior: auto; }
+html:has(body[data-motion='off']) { scroll-behavior: auto; }
+
+@media (forced-colors: active) {
+  .field-toolbar, .field-toolbar-actions button, .mobile-field-nav, .mobile-field-nav button,
+  .practice-banner, .practice-action, .practice-chip { border: 1px solid ButtonText; }
+  .mobile-field-nav button[aria-current='location'] { outline: 2px solid Highlight; }
+  .mobile-field-nav button[aria-current='true'] { outline: 2px solid Highlight; }
+}

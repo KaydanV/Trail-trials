@@ -4,6 +4,9 @@ import {createProgress, createStorage} from './storage.js';
 import {getPresentation, renderPropIcon} from './presentation.js';
 import {createTutorial} from './tutorial.js';
 import {describeCommand} from './tools.js';
+import {getNextObjective, getHint, explainFailure} from './coach.js';
+import {createPracticeMission, MAX_PRACTICE_VARIANT} from './practice.js';
+import {renderWorld, updateWorld} from './world.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -21,6 +24,7 @@ let view = 'home';
 let current = missions.findIndex(m => m.id === profile.currentMission);
 if (current < 0) current = 0;
 let session = null, historyIndex = 0, busy = false, dialogReturn = null, sceneIndex = 0, previewScene = false;
+let remixMission = null, fieldObserver = null;
 let tickAt = performance.now();
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const tutorial = createTutorial({
@@ -30,6 +34,13 @@ const tutorial = createTutorial({
     document.activeElement?.scrollIntoView({block:'nearest', behavior:'instant'});
   }
 });
+
+function activeMission() { return remixMission || missions[current]; }
+function practiceEntry() { return profile.practiceSessions[missions[current].id]; }
+function attemptComplete() { return remixMission ? !!practiceEntry()?.completed : profile.completed.includes(missions[current].id); }
+function freshSession(mission) {
+  return {shell:createShell(mission.fixtures), tasks:mission.objectives.map(() => false), started:false, commands:0, hints:0, elapsed:0, hintState:{targetId:null,depth:0}, hintLevel:0};
+}
 
 function readProfile(number) {
   try { return storage.read(number) || createProgress(missions); }
@@ -42,8 +53,11 @@ function readProfile(number) {
 function persist() {
   if (corruptSlots.has(slot)) return;
   const hadStorage = storage.available;
-  if (session) profile.sessions[missions[current].id] = session;
-  profile.currentMission = missions[current].id;
+  if (session) {
+    if (remixMission) practiceEntry().session = session;
+    else profile.sessions[activeMission().id] = session;
+  }
+  if (!remixMission) profile.currentMission = activeMission().id;
   try { storage.write(slot, profile); } catch (error) { toast(error.message); }
   if (hadStorage && !storage.available) {
     toast('Browser storage is full or unavailable. Your journey continues in this tab; export it before closing.');
@@ -82,7 +96,7 @@ function worldCard(name, number, description, tags, type) {
   return '<article class="world-card ' + type + '"><div class="world-art world-art-' + number + '" ' + (available ? 'style="background-image:url(assets/expedition.webp)"' : '') + '><span class="world-number">' + number + '</span><span class="lock-label">' + (available ? 'YOUR FIRST EXPEDITION' : '⌁ NEXT HORIZON') + '</span></div><div class="world-content"><div class="eyebrow">' + tags + '</div><h3>' + name + '</h3><p>' + description + '</p><div class="world-tags">' + (available ? '<span>24 playable missions</span><button class="back-link" data-action="start">Explore trail →</button>' : '<button class="locked-mode" data-testid="' + id + '" disabled aria-disabled="true">' + lock + '</button>') + '</div></div></article>';
 }
 function renderHome() {
-  view = 'home'; session = null;
+  view = 'home'; session = null; remixMission = null; fieldObserver?.disconnect();
   $('#app').innerHTML = header() + '<main id="main" class="home-view" tabindex="-1"><section class="hero"><div class="hero-copy"><div class="eyebrow"><span class="live-dot"></span> CYBERSECURITY, WITH A LITTLE ADVENTURE</div><h1 class="hero-title">Big adventure.<br>Real skills.<br><em>Your first trail.</em></h1><p class="hero-description">A curious robot. A mountain full of mysteries. And you, figuring it all out one command at a time. This is where your cybersecurity story starts.</p><div class="hero-actions"><button class="button primary" data-action="start" data-testid="start-journey">' + (completedCount() ? 'Continue your adventure' : 'Let’s hit the trail') + ' <span>→</span></button><button class="button secondary" data-action="preview">▷ Meet the story</button></div><div class="hero-proof"><span>✧ Learn by doing</span><span>⌘ No experience needed</span><span>♡ Room to make mistakes</span></div></div><div class="hero-art" role="img" aria-label="Nova and Patch overlooking an alpine lake and distant signal tower"><div class="hero-art-overlay"></div><div class="floating-badge"><span>✦</span> Your next chapter starts here.</div><div class="hero-caption"><span>01 / HIKE TRAIL</span><strong>Every expert starts somewhere.</strong></div></div></section><section class="home-section worlds-section"><div class="section-heading"><div><div class="eyebrow">CHOOSE YOUR JOURNEY</div><h2>A world worth figuring out.</h2></div><p>Start a little silly. Finish a lot more capable.<br>The trail comes first. Bigger challenges follow.</p></div><div class="world-grid">' + worldCard('Hike Trail','01','From finding Patch’s missing snacks to restoring the valley’s signal. Build your foundation through one connected adventure.','FOUNDATION · AVAILABLE NOW','available') + worldCard('The Office','02','The next chapter: teammates, suspicious emails, everyday systems, and decisions that matter at work.','WORKPLACE · PLANNED','locked') + worldCard('The Night Shift','03','Realistic investigations, changing priorities, and time-sensitive tasks when the rest of the world is asleep.','OPERATIONS · PLANNED','locked') + '</div></section><section class="home-section journeys-section" id="journeys"><div class="section-heading"><div><div class="eyebrow">YOUR LITTLE CORNER OF THE WORLD</div><h2>Keep your adventure going.</h2></div><p>Three independent journeys. Pick one and make it yours.</p></div><div class="journey-grid">' + [1,2,3].map(number => {
     let data = null;
     try { data = storage.read(number); } catch { corruptSlots.add(number); }
@@ -121,14 +135,37 @@ function loadMission(index) {
   if (busy) return toast('Patch is finishing your command. One moment.');
   if (index > unlockedIndex()) return toast('This stop opens when you complete the earlier mission.');
   if (session) persist();
+  tutorial.close(); remixMission = null;
   current = index;
-  const mission = missions[current];
-  session = profile.sessions[mission.id] || {shell:createShell(mission.fixtures), tasks:mission.objectives.map(() => false), started:false, commands:0, hints:0, elapsed:0};
+  const mission = activeMission();
+  session = profile.sessions[mission.id] || freshSession(mission);
   historyIndex = session.shell.history.length;
   view = 'game'; busy = false;
   persist(); renderGame(); window.scrollTo({top:0,behavior:'instant'});
   if (!session.started) showScene(false);
   else if (!profile.settings.tutorialSeen) tutorial.open();
+}
+function startPractice(next=false) {
+  if (busy) return toast('Patch is finishing your command. One moment.');
+  const base=missions[current];
+  if (!profile.completed.includes(base.id)) return toast('Clear this trail stop first. Then its practice cases open.');
+  if (session) persist();
+  tutorial.close(); closeDialog(); closeScene(false);
+  const previous=profile.practiceSessions[base.id];
+  const fresh=next||!previous||previous.completed;
+  const variant=fresh?previous?(previous.variant%MAX_PRACTICE_VARIANT)+1:1:previous.variant;
+  remixMission=createPracticeMission(base,variant);
+  if(fresh)profile.practiceSessions[base.id]={variant,session:freshSession(remixMission),completed:false,note:''};
+  session=practiceEntry().session;
+  historyIndex=session.shell.history.length;view='game';busy=false;tickAt=performance.now();
+  persist();renderGame();window.scrollTo({top:0,behavior:'instant'});
+  if(!profile.settings.tutorialSeen)tutorial.open();
+}
+function exitPractice() { if(!busy)loadMission(current); }
+function practiceMarkup() {
+  if(remixMission)return '<aside class="practice-banner"><div><strong id="practice-variant" data-testid="practice-variant">PRACTICE REMIX / CASE '+remixMission.practiceVariant+'</strong><p id="practice-status">Fresh filenames and evidence. Read this case carefully. Your trail achievements and XP stay saved separately.</p></div><div class="practice-banner-actions"><button class="button secondary practice-action" id="practice-next" data-testid="practice-next">New case ↻</button><button class="button ghost practice-action" id="practice-exit" data-testid="practice-exit">Back to this trail stop →</button></div></aside>';
+  if(profile.completed.includes(activeMission().id))return '<div class="practice-entry"><p>This stop is yours. Try fresh evidence to see what has stuck.</p><button class="button secondary" id="practice-mission" data-testid="practice-mission">'+(practiceEntry()&&!practiceEntry().completed?'Continue practice case '+practiceEntry().variant:'Try a practice remix')+' ↻</button></div>';
+  return '';
 }
 function atlasStyle(scene) {
   return 'background-image:url(' + escape(scene.asset) + ');background-size:300% 200%;background-position:' + escape(scene.position);
@@ -141,12 +178,12 @@ function portrait(name, classes = 'character-portrait') {
 }
 function sceneMarkup(mission) {
   const presentation = getPresentation(mission, 0), scene = presentation.scene;
-  return '<figure class="mission-scene" data-scene="' + escape(scene.id) + '" data-palette="' + escape(scene.palette) + '" data-state="exploring">' +
-    '<div class="scene-viewport" role="img" aria-label="' + escape(scene.alt) + '" style="' + atlasStyle(scene) + '"><div class="scene-weather" aria-hidden="true"></div><div class="mission-prop" aria-hidden="true">' + renderPropIcon(scene.prop) + '</div><span class="scene-coordinate">FIELD FEED / ' + String(current+1).padStart(2,'0') + '</span></div>' +
+  return '<figure class="mission-scene" tabindex="-1" data-scene="' + escape(scene.id) + '" data-palette="' + escape(scene.palette) + '" data-state="exploring">' +
+    '<div class="scene-viewport" role="img" aria-label="' + escape(scene.alt) + '" style="' + atlasStyle(scene) + '"><div class="scene-weather" aria-hidden="true"></div><div class="mission-prop" aria-hidden="true">' + renderPropIcon(scene.prop) + '</div>'+renderWorld(mission)+'<span class="scene-coordinate">FIELD FEED / ' + String(current+1).padStart(2,'0') + '</span></div>' +
     '<figcaption class="scene-caption"><span>' + escape(scene.label) + '</span><span id="scene-status" class="scene-state">Your next clue is waiting</span></figcaption></figure>';
 }
 function renderGame() {
-  const mission = missions[current], count = session.tasks.filter(Boolean).length, presentation = getPresentation(mission,0);
+  const mission = activeMission(), count = session.tasks.filter(Boolean).length, presentation = getPresentation(mission,0);
   $('#app').innerHTML = header() +
     '<main id="main" class="game-view" tabindex="-1"><div class="game-topline"><button class="back-link" data-action="home" data-testid="home">← Back to the adventure</button><span class="mission-counter">HIKE TRAIL / STOP ' + String(current+1).padStart(2,'0') + ' OF ' + missions.length + '</span><span class="xp-badge">✦ ' + xp() + ' XP</span></div>' +
     '<div class="expedition-layout"><aside class="trail-sidebar"><div class="trail-progress"><div class="eyebrow">YOUR EXPEDITION</div><h2>Hike Trail</h2><p>' + completedCount() + ' / ' + missions.length + ' stops cleared</p><div class="progress-bar"><span style="width:' + completedCount()/missions.length*100 + '%"></span></div></div>' +
@@ -155,24 +192,31 @@ function renderGame() {
       missions.map((m,index) => m.act === actIndex ?
         '<button class="trail-node ' + (profile.completed.includes(m.id)?'completed ':'') + (index===current?'active ':'') + (index>unlockedIndex()?'locked':'') + '" data-mission="' + index + '" ' + (index>unlockedIndex()?'disabled':'') + ' aria-current="' + (index===current?'step':'false') + '"><span class="node-number">' + (profile.completed.includes(m.id)?'✓':String(index+1).padStart(2,'0')) + '</span><span>' + escape(m.title) + '</span>' + (index>unlockedIndex()?'<span aria-label="Locked">⌁</span>':'') + '</button>' : '').join('')).join('') +
     '</details><div class="sidebar-future"><span>⌁ The Office</span><span>⌁ The Night Shift</span><small>Build the foundation first.<br>These chapters are still in development.</small></div></aside>' +
-    '<section class="mission-workspace"><section class="mission-banner scene-banner">' + sceneMarkup(mission) +
+    '<section class="mission-workspace"><div id="practice-controls">' + practiceMarkup() + '</div><section class="mission-banner scene-banner">' + sceneMarkup(mission) +
     '<div class="mission-overview"><div class="mission-eyebrow">ACT ' + (mission.act+1) + ' · ' + escape(mission.location) + '</div><h1>' + escape(mission.title) + '</h1><p>' + escape(mission.summary) + '</p><div class="mission-meta"><span class="chip">' + escape(mission.difficulty) + '</span><span class="chip">◷ ' + escape(mission.estimate) + '</span><button class="chip replay-story" id="replay-story">▷ Replay story</button><button class="chip tour-replay" id="tour-replay" data-testid="tour-replay">⌘ Show me around</button></div><div class="scene-progress" aria-label="Mission stages"><span data-stage="clues">01 / Follow the clues</span><span data-stage="decision">02 / Make your call</span><span data-stage="reflection">03 / Make it stick</span></div></div></section>' +
     '<div class="ready-banner ' + (session.started?'hidden':'') + '"><div><strong>No rush. You’ve got this.</strong><p>Nova has the brief. Patch has your back. Get comfortable, then wake up your field terminal.</p></div><button class="button primary" id="start-mission" data-testid="start-mission">Start mission →</button></div>' +
     '<div class="mission-grid"><div class="briefing-column"><article class="story-card">' + portrait(presentation.speaker.name) +
     '<div><div class="speaker">' + escape(presentation.speaker.name + ' · ' + presentation.speaker.role) + '</div><p class="story-message">' + escape(mission.story[0]?.text || mission.summary) + '</p><div class="mission-skills">' + mission.skills.map(skill=>'<span class="chip">' + escape(skill) + '</span>').join('') + '</div></div></article>' +
-    '<article class="objectives-card"><div class="card-heading"><h2>Your mission</h2><span id="mission-progress" data-testid="mission-progress">' + count + ' / ' + mission.objectives.length + '</span></div><div id="objectives">' + objectivesHtml() + '</div></article>' +
-    '<article class="decision-card"><div class="decision-illustration" aria-hidden="true">' + renderPropIcon(presentation.clue.icon) + '</div><div class="eyebrow">YOUR CALL</div><h2>' + escape(mission.decision.title) + '</h2><p>' + escape(mission.decision.context) + '</p><div class="decision-options">' + mission.decision.options.map(option=>'<button class="decision-option" data-decision="' + escape(option.id) + '" data-testid="decision-' + escape(option.id) + '" ' + (!session.started?'disabled':'') + '>' + escape(option.label) + '</button>').join('') + '</div><p id="decision-feedback" role="status"></p></article>' +
+    '<article class="objectives-card" tabindex="-1"><div class="card-heading"><h2>Your mission</h2><span id="mission-progress" data-testid="mission-progress">' + count + ' / ' + mission.objectives.length + '</span></div><div id="objectives">' + objectivesHtml() + '</div></article>' +
+    '<article class="decision-card" tabindex="-1"><div class="decision-illustration" aria-hidden="true">' + renderPropIcon(presentation.clue.icon) + '</div><div class="eyebrow">YOUR CALL</div><h2>' + escape(mission.decision.title) + '</h2><p>' + escape(mission.decision.context) + '</p><div class="decision-options">' + mission.decision.options.map(option=>'<button class="decision-option" data-decision="' + escape(option.id) + '" data-testid="decision-' + escape(option.id) + '" ' + (!session.started?'disabled':'') + '>' + escape(option.label) + '</button>').join('') + '</div><p id="decision-feedback" role="status"></p></article>' +
     '<article class="field-note"><div class="eyebrow">THIS SKILL GOES PLACES</div><p>' + escape(mission.realWorld) + '</p></article></div>' +
-    '<div class="terminal-column"><section class="terminal-window" aria-label="Your training terminal"><div class="terminal-header"><div class="terminal-dots"><i></i><i></i><i></i></div><span class="terminal-label">PATCH’S FIELD TERMINAL</span><div class="terminal-tools"><button id="clear-terminal" aria-label="Clear terminal display">Clear</button></div></div>' +
+    '<div class="terminal-column"><section class="terminal-window" tabindex="-1" aria-label="Your training terminal"><div class="field-toolbar"><div><span class="field-toolbar-label">YOUR NEXT MOVE</span><strong id="current-objective" data-testid="current-objective"></strong><small id="current-objective-detail"></small></div><div class="field-toolbar-actions"><button type="button" id="jump-clues" data-testid="jump-clues">Clues</button><button type="button" id="jump-patch" data-testid="jump-patch">Patch</button><button type="button" id="jump-decision" data-testid="jump-decision">Make call</button></div></div><div class="terminal-header"><div class="terminal-dots"><i></i><i></i><i></i></div><span class="terminal-label">PATCH’S FIELD TERMINAL</span><div class="terminal-tools"><button id="clear-terminal" aria-label="Clear terminal display">Clear</button></div></div>' +
     '<div id="terminal-output" class="terminal-output" role="log" aria-live="polite" aria-label="Terminal output"></div><form id="terminal-form" class="terminal-form" autocomplete="off"><label class="terminal-prompt" for="terminal-input">trainee@trail:' + escape(session.shell.cwd.replace('/home/trainee','~')) + '$</label><input id="terminal-input" data-testid="terminal-input" aria-label="Type a command" placeholder="Your next move…" spellcheck="false" autocapitalize="off" autocomplete="off" ' + (!session.started?'disabled':'') + '><button class="run-button" data-testid="run-command" type="submit" aria-label="Run command" ' + (!session.started?'disabled':'') + '>↵</button></form><div class="terminal-footer"><span>↑ ↓ history · Tab autocomplete · type help</span><span>Local simulation</span></div></section>' +
     '<div class="command-guide"><span>TOOLS FOR THIS STOP</span><div class="command-chips">' + commandNames(mission).map(command=>'<button class="command-chip" data-command="' + escape(command) + '">' + escape(command) + '</button>').join('') + '</div><div class="command-explainer" id="command-explainer" role="status"><strong>Every tool has a job.</strong><p>Pick a command to see what it does. Nothing runs until you press Enter.</p></div></div>' +
-    '<article class="hint-card hint-companion" data-emotion="' + (session.hints?'hint':'idle') + '"><div class="hint-heading"><div><div class="eyebrow">COMPANION CHANNEL / PATCH</div><strong>Your very curious field buddy.</strong></div><span class="companion-online">● ONLINE</span></div>' +
-    '<div class="hint-stage"><button type="button" class="patch-portrait companion-portrait" id="patch-chat" data-testid="patch-chat" aria-label="Check in with Patch" style="' + portraitStyle('PATCH') + '"><span class="character-signal" aria-hidden="true"></span></button><p class="patch-speech" id="hint-text" role="status">' + escape(session.hints?mission.hints[Math.min(session.hints-1,mission.hints.length-1)]:'Hey, trail buddy. I’m right here. Tap me for a check-in, or ask for a clue when you need one.') + '</p></div>' +
-    '<div class="hint-meter" aria-label="Three clue strengths"><span>Small nudge</span><span>Dig a little deeper</span><span>Show the route</span></div><div class="hint-actions"><button class="button secondary" id="hint-button">Ask Patch ' + (session.hints?'('+session.hints+')':'') + '</button><button class="button ghost" id="restart-mission">↻ Try this stop again</button></div><p class="patch-response" id="patch-response" role="status">Good questions are part of the adventure.</p></article>' +
+    '<article class="hint-card hint-companion" tabindex="-1" data-emotion="' + (session.hints?'hint':'idle') + '"><div class="hint-heading"><div><div class="eyebrow">COMPANION CHANNEL / PATCH</div><strong>Your very curious field buddy.</strong></div><span class="companion-online">● ONLINE</span></div>' +
+    '<div class="hint-stage"><button type="button" class="patch-portrait companion-portrait" id="patch-chat" data-testid="patch-chat" aria-label="Check in with Patch" style="' + portraitStyle('PATCH') + '"><span class="character-signal" aria-hidden="true"></span></button><p class="patch-speech" id="hint-text" role="status">' + escape(hintText()) + '</p></div>' +
+    '<div class="hint-meter" aria-label="Three clue strengths"><span>Small nudge</span><span>Dig a little deeper</span><span>Show the route</span></div><div class="hint-actions"><button class="button secondary" id="hint-button">Ask Patch ' + (session.hints?'('+session.hints+')':'') + '</button><button class="button ghost" id="restart-mission">↻ Try this stop again</button></div><p class="patch-response" id="patch-response" role="status">Good questions are part of the adventure.</p><p class="world-dialogue" id="world-dialogue" role="status"></p></article>' +
     '<div class="mission-actions"><div><p class="mission-feedback" id="mission-feedback" role="status">' + (count===mission.objectives.length?'All evidence collected. Tell Nova what you found.':'Make the moves. Follow the clues. Then make your call.') + '</p><small id="session-timer">' + timingText() + '</small></div><button class="button primary" id="debrief" data-testid="debrief" ' + (count!==mission.objectives.length?'disabled':'') + '>Finish & reflect →</button></div></div></div>' +
-    '<div class="game-foundation-status" data-testid="foundation-status">' + (allComplete()?'Foundation complete · Office and Night Shift remain in development.':completedCount()+'/'+missions.length+' foundation missions cleared · Next worlds locked') + '</div></section></div></main>' + footer();
+    '<div class="game-foundation-status" data-testid="foundation-status">' + (allComplete()?'Foundation complete · Office and Night Shift remain in development.':completedCount()+'/'+missions.length+' foundation missions cleared · Next worlds locked') + '</div></section></div><nav class="mobile-field-nav" aria-label="Field shortcuts"><button type="button" data-target="scene" data-testid="field-scene">Scene</button><button type="button" data-target="objectives" data-testid="field-objectives">Clues</button><button type="button" data-target="terminal" data-testid="field-terminal">Terminal</button><button type="button" data-target="decision" data-testid="field-decision">Your call</button></nav></main>' + footer();
   bindActions();
   $$('[data-mission]').forEach(button=>button.onclick=()=>loadMission(Number(button.dataset.mission)));
+  $('#practice-mission')?.addEventListener('click',()=>startPractice());
+  $('#practice-next')?.addEventListener('click',()=>startPractice(true));
+  $('#practice-exit')?.addEventListener('click',exitPractice);
+  $('#jump-clues').onclick=()=>jumpToField('objectives');
+  $('#jump-patch').onclick=()=>jumpToField('patch');
+  $('#jump-decision').onclick=()=>jumpToField(session.tasks.every(Boolean)?'reflection':'decision');
+  $$('[data-target]').forEach(button=>button.onclick=()=>jumpToField(button.dataset.target));
   $('#start-mission').onclick=beginMission;
   $('#replay-story').onclick=()=>showScene(false);
   $('#tour-replay').onclick=()=>{if(!busy)tutorial.open();};
@@ -196,14 +240,58 @@ function renderGame() {
   if(session.shell.history.length)terminalLine('Last moves:\n'+session.shell.history.slice(-5).join('\n'),'system');
   updateTasks();
   updateHintMeter();
+  observeField();
+  syncKeyboardState();
   if(window.innerWidth<900)$('.trail-details').open=false;
+}
+
+function jumpToField(target) {
+  const regions={scene:'.mission-scene',objectives:'.objectives-card',terminal:'.terminal-window',patch:'.hint-companion',decision:'.decision-card',reflection:'.mission-actions'};
+  const region=$(regions[target]);if(!region)return;
+  if(target!=='terminal')$('#terminal-input')?.blur();
+  region.scrollIntoView({block:'start',behavior:document.body.dataset.motion==='off'?'instant':'smooth'});
+  const focus=target==='terminal'&&session.started?$('#terminal-input'):target==='reflection'?$('#debrief'):region;
+  focus.focus({preventScroll:true});
+  $$('[data-target]').forEach(button=>{
+    if(button.dataset.target===target)button.setAttribute('aria-current','location');else button.removeAttribute('aria-current');
+  });
+}
+function observeField() {
+  fieldObserver?.disconnect();
+  if(!window.IntersectionObserver)return;
+  const visible=new Map();
+  fieldObserver=new IntersectionObserver(entries=>{
+    entries.forEach(entry=>visible.set(entry.target,entry.isIntersecting?entry.intersectionRatio:0));
+    const top=[...visible].sort((a,b)=>b[1]-a[1])[0];
+    if(!top||!top[1])return;
+    const key=top[0].dataset.fieldTarget;
+    $$('[data-target]').forEach(button=>{if(button.dataset.target===key)button.setAttribute('aria-current','location');else button.removeAttribute('aria-current');});
+  },{rootMargin:'-5% 0px -18% 0px',threshold:[0,.2,.5,.8]});
+  [['scene','.mission-scene'],['objectives','.objectives-card'],['terminal','.terminal-window'],['decision','.decision-card']].forEach(([key,selector])=>{
+    const node=$(selector);node.dataset.fieldTarget=key;fieldObserver.observe(node);
+  });
+}
+function syncKeyboardState() {
+  const typing=document.activeElement===$('#terminal-input');
+  document.body.dataset.keyboard=typing&&window.visualViewport&&window.visualViewport.height<window.innerHeight*.78?'true':'false';
+}
+function syncHintTarget() {
+  const target=getNextObjective(activeMission(),session.tasks)?.objective.id||null;
+  if(!session.hintState||session.hintState.targetId!==target)session.hintState={targetId:target,depth:0};
+  return target;
+}
+function hintText() {
+  const target=syncHintTarget();
+  if(session.hintState.depth>0){const hint=getHint(activeMission(),session,session.hintState.depth-1);return hint.text+(hint.example?'\n'+hint.example:'');}
+  if(!target)return 'Every clue is checked. Finish and reflect with Nova to make this skill stick.';
+  return 'Hey, trail buddy. I’m following your clues. Ask me about '+getNextObjective(activeMission(),session.tasks).objective.label.toLowerCase()+' whenever you need a nudge.';
 }
 
 function commandNames(mission) {
   return [...new Set(mission.solutions.map(command => command.trim().split(/\s+/)[0]))].slice(0,6).concat('help');
 }
 function objectivesHtml() {
-  return missions[current].objectives.map((objective,index) => '<div class="objective ' + (session.tasks[index]?'done':'') + '" data-testid="objective-' + index + '" data-complete="' + !!session.tasks[index] + '"><span class="objective-check">' + (session.tasks[index]?'✓':String(index+1).padStart(2,'0')) + '</span><div><strong>' + escape(objective.label) + '</strong><small>' + escape(objective.detail) + '</small></div></div>').join('');
+  return activeMission().objectives.map((objective,index) => '<div class="objective ' + (session.tasks[index]?'done':'') + '" data-testid="objective-' + index + '" data-complete="' + !!session.tasks[index] + '"><span class="objective-check">' + (session.tasks[index]?'✓':String(index+1).padStart(2,'0')) + '</span><div><strong>' + escape(objective.label) + '</strong><small>' + escape(objective.detail) + '</small></div></div>').join('');
 }
 function beginMission() {
   if (session.started || tutorial.isOpen()) return;
@@ -238,9 +326,11 @@ async function runCommand() {
     else if(!result.error) terminalLine('✓ Done.','system');
     const before = session.tasks.filter(Boolean).length;
     verify(result); persist();
-    if (result.error) wakePatch('thinking', 'That move didn’t land. Check the message, adjust your command, and try again.');
+    if (result.error) wakePatch('thinking', explainFailure(activeMission(),session,raw,result)||'Read the terminal message, then adjust one thing and try again.');
     else if (session.tasks.filter(Boolean).length > before) {
-      wakePatch('celebrate', 'Nice find! That clue checks out. We’re getting somewhere.');
+      const world=updateWorld($('.mission-scene'),activeMission(),session,attemptComplete());
+      wakePatch('celebrate', 'Nice find! '+world.title+'.');
+      $('#world-dialogue').textContent=world.actor+': '+world.detail;
       const scene = $('.mission-scene');
       if (scene) { scene.dataset.effect = 'verified'; setTimeout(() => { if (scene.isConnected) delete scene.dataset.effect; }, 850); }
     }
@@ -250,7 +340,7 @@ async function runCommand() {
 }
 function verify(result) {
   if(result.error)return;
-  missions[current].objectives.forEach((objective,index)=>{
+  activeMission().objectives.forEach((objective,index)=>{
     if(!session.tasks[index]&&matchesObjective(objective,result,session.shell)){
       session.tasks[index]=true;
       terminalLine('✦ Evidence verified: '+objective.label,'success');
@@ -260,16 +350,29 @@ function verify(result) {
 }
 function updateTasks() {
   if(!session||!$('#objectives'))return;
+  if(!remixMission&&profile.completed.includes(activeMission().id)&&!$('#practice-mission')){
+    $('#practice-controls').innerHTML=practiceMarkup();$('#practice-mission').onclick=()=>startPractice();
+  }
   $('#objectives').innerHTML=objectivesHtml();
-  const count=session.tasks.filter(Boolean).length, total=missions[current].objectives.length;
+  const count=session.tasks.filter(Boolean).length, total=activeMission().objectives.length;
   $('#mission-progress').textContent=count+' / '+total;
   $('#debrief').disabled=count!==total;
   $('#mission-feedback').textContent=count===total?'All evidence collected. Tell Nova what you found.':'Make the moves. Follow the clues. Then make your call.';
-  const decisionDone=missions[current].objectives.some((objective,index)=>objective.check.type==='decision'&&session.tasks[index]);
-  const cluesDone=missions[current].objectives.every((objective,index)=>objective.check.type==='decision'||session.tasks[index]);
+  const target=syncHintTarget(),next=getNextObjective(activeMission(),session.tasks);
+  $('#current-objective').textContent=next?next.objective.label:'All clues collected. Make it stick.';
+  $('#current-objective-detail').textContent=next?next.objective.detail:'Finish and reflect with Nova. Your evidence is ready.';
+  $('#jump-decision').textContent=next?'Your call':'Finish';
+  $('#hint-text').textContent=hintText();
+  $('.hint-companion').dataset.hintTarget=target||'reflection';
+  updateHintMeter();
+  const decisionDone=activeMission().objectives.some((objective,index)=>objective.check.type==='decision'&&session.tasks[index]);
+  const cluesDone=activeMission().objectives.every((objective,index)=>objective.check.type==='decision'||session.tasks[index]);
   const state=count===total?'complete':cluesDone?'decision':'exploring';
   $('.mission-scene').dataset.state=state;
   $('#scene-status').textContent=count===total?'Evidence secured · Ready to reflect':cluesDone?'Clues collected · Your call':count?'A new clue · Keep following the trail':'Your next clue is waiting';
+  const world=updateWorld($('.mission-scene'),activeMission(),session,attemptComplete());
+  $('#scene-status').textContent=world.title;
+  if(remixMission)$('#practice-status').textContent=practiceEntry().completed?'Practice case complete. Try fresh evidence or return to your trail stop.':count===total?'Case evidence checked. Reflect with Nova to finish this practice attempt.':'Fresh filenames and evidence. Read this case carefully. Your trail achievements and XP stay saved separately.';
   $$('[data-stage]').forEach(stage=>{
     const complete=stage.dataset.stage==='clues'?cluesDone:stage.dataset.stage==='decision'?decisionDone:false;
     const active=stage.dataset.stage===(count===total?'reflection':cluesDone?'decision':'clues');
@@ -277,7 +380,7 @@ function updateTasks() {
     if(active)stage.setAttribute('aria-current','step');else stage.removeAttribute('aria-current');
   });
   if(decisionDone){
-    const correct=missions[current].decision.options.find(option=>option.correct);
+    const correct=activeMission().decision.options.find(option=>option.correct);
     const button=$('[data-decision="'+correct.id+'"]');
     if(button)button.classList.add('correct');
     $$('[data-decision]').forEach(option=>option.disabled=true);
@@ -286,8 +389,8 @@ function updateTasks() {
 }
 function makeDecision(id) {
   if(!session.started||tutorial.isOpen())return;
-  const option=missions[current].decision.options.find(item=>item.id===id); if(!option)return;
-  const requiredEvidence=missions[current].objectives.every((objective,index)=>objective.check.type==='decision'||session.tasks[index]);
+  const option=activeMission().decision.options.find(item=>item.id===id); if(!option)return;
+  const requiredEvidence=activeMission().objectives.every((objective,index)=>objective.check.type==='decision'||session.tasks[index]);
   if(!requiredEvidence){$('#decision-feedback').textContent='Collect the terminal evidence first. Your call should follow what you found.';return;}
   $$('[data-decision]').forEach(button=>{button.classList.remove('correct','wrong');button.setAttribute('aria-pressed',String(button.dataset.decision===id));});
   $('[data-decision="'+id+'"]').classList.add(option.correct?'correct':'wrong');
@@ -296,11 +399,12 @@ function makeDecision(id) {
   else wakePatch('thinking','We can rethink that. Let the clues guide the next choice.');
 }
 function updateHintMeter() {
+  const depth=session.hintState?.depth||0;
   $$('.hint-meter span').forEach((item,index)=>{
-    item.classList.toggle('used',index<session.hints);
-    item.classList.toggle('active',index===Math.min(session.hints,3)-1);
+    item.classList.toggle('used',index<depth);
+    item.classList.toggle('active',index===depth-1);
   });
-  $('.hint-meter')?.setAttribute('aria-label',Math.min(session.hints,3)+' of 3 clue strengths revealed');
+  $('.hint-meter')?.setAttribute('aria-label',depth+' of 3 clue strengths revealed for this step');
 }
 function wakePatch(emotion,text) {
   const card=$('.hint-companion'), portrait=$('#patch-chat');
@@ -322,19 +426,28 @@ function checkInWithPatch() {
 function giveHint() {
   if(tutorial.isOpen())return;
   if(!session.started)return toast('Start this mission first, then Patch can help.');
-  session.hints++;
-  const mission=missions[current];
-  $('#hint-text').textContent=mission.hints[Math.min(session.hints-1,mission.hints.length-1)];
+  const mission=activeMission();
+  const target=syncHintTarget();
+  if(!target){$('#hint-text').textContent=getHint(mission,session,0).text;wakePatch('thinking','Your evidence is ready. Finish and reflect with Nova.');return;}
+  const strength=Math.min(session.hintState.depth,2),hint=getHint(mission,session,strength);
+  session.hints++;session.hintState.depth=Math.min(session.hintState.depth+1,3);
+  session.hintLevel=Math.max(session.hintLevel||0,strength+1);
+  $('#hint-text').textContent=hint.text+(hint.example?'\n'+hint.example:'');
   $('#hint-button').textContent='Ask Patch ('+session.hints+')';
   updateHintMeter();
-  wakePatch('hint',session.hints<3?'A little nudge. Try it out, and we’ll follow the next clue.':'Here’s the route. Take it one command at a time and watch what each move tells you.');
+  $('.hint-companion').dataset.hintTarget=hint.targetId;
+  wakePatch('hint',strength<2?'This nudge follows your current clue. Clear it and I’ll meet you at the next one.':'Here’s the move for this clue. Read its output and decide what it tells you.');
   persist();
 }
 function restartMission() {
   if (busy) return toast('Patch is finishing your command. One moment.');
   openDialog('<div class="eyebrow">A FRESH ATTEMPT</div><h2 id="dialog-title">Try this stop again?</h2><p>Your saved achievements and other missions stay with you. The files, clues, and score for this attempt start fresh.</p><div class="setting-row"><button class="button secondary" id="cancel-restart">Keep exploring</button><button class="button primary" id="confirm-restart">Restart this mission</button></div>');
   $('#cancel-restart').onclick=closeDialog;
-  $('#confirm-restart').onclick=()=>{if(busy)return;const id=missions[current].id;closeDialog();session=null;delete profile.sessions[id];persist();loadMission(current);};
+  $('#confirm-restart').onclick=()=>{
+    if(busy)return;const id=activeMission().id;closeDialog();
+    if(remixMission){practiceEntry().session=freshSession(remixMission);practiceEntry().completed=false;practiceEntry().note='';session=practiceEntry().session;historyIndex=0;persist();renderGame();window.scrollTo({top:0,behavior:'instant'});}
+    else{session=null;delete profile.sessions[id];persist();loadMission(current);}
+  };
 }
 function terminalKeys(event) {
   if(event.key==='ArrowUp'||event.key==='ArrowDown'){
@@ -355,7 +468,7 @@ function showScene(preview=false) {
   renderScene();$('.cinematic').focus();
 }
 function renderScene() {
-  const mission=missions[current],frame=mission.story[sceneIndex],presentation=getPresentation(mission,sceneIndex),scene=presentation.scene;
+  const mission=activeMission(),frame=mission.story[sceneIndex],presentation=getPresentation(mission,sceneIndex),scene=presentation.scene;
   $('.cinematic').dataset.act = String(mission.act);
   $('.cinematic').dataset.frame = String(sceneIndex);
   $('.cinematic').dataset.speaker=presentation.speaker.name.toLowerCase();
@@ -390,8 +503,8 @@ function timingText() {
 }
 function debrief() {
   if(!session.tasks.every(Boolean))return;
-  const mission=missions[current];
-  openDialog('<div class="eyebrow">A MOMENT TO MAKE IT STICK</div><h2 id="dialog-title">Nice moves. What did they mean?</h2><p>'+escape(mission.debrief)+'</p><h3>'+escape(mission.quiz.question)+'</h3><div class="quiz-options">'+mission.quiz.options.map((option,index)=>'<button class="quiz-choice" data-quiz="'+index+'" data-testid="quiz-'+index+'">'+escape(option)+'</button>').join('')+'</div><p id="quiz-feedback" role="status"></p><label class="reflection-label" for="reflection">Leave a note for your future self <span>(optional)</span></label><textarea id="reflection" maxlength="2000" placeholder="What clicked? What would you check next time?">'+escape(profile.notes[mission.id]||'')+'</textarea><button class="button primary" id="complete-mission" data-testid="complete-mission" disabled>Complete this stop ✦</button>');
+  const mission=activeMission();
+  openDialog('<div class="eyebrow">'+(remixMission?'PRACTICE CASE / MAKE IT STICK':'A MOMENT TO MAKE IT STICK')+'</div><h2 id="dialog-title">Nice moves. What did they mean?</h2><p>'+escape(mission.debrief)+'</p><h3>'+escape(mission.quiz.question)+'</h3><div class="quiz-options">'+mission.quiz.options.map((option,index)=>'<button class="quiz-choice" data-quiz="'+index+'" data-testid="quiz-'+index+'">'+escape(option)+'</button>').join('')+'</div><p id="quiz-feedback" role="status"></p><label class="reflection-label" for="reflection">Leave a note for your future self <span>(optional)</span></label><textarea id="reflection" maxlength="2000" placeholder="What clicked? What would you check next time?">'+escape((remixMission?practiceEntry().note:profile.notes[mission.id])||'')+'</textarea><button class="button primary" id="complete-mission" data-testid="complete-mission" disabled>'+(remixMission?'Complete this practice case ✦':'Complete this stop ✦')+'</button>');
   $$('[data-quiz]').forEach(button=>button.onclick=()=>{
     const correct=Number(button.dataset.quiz)===mission.quiz.answer;
     $$('[data-quiz]').forEach(item=>{item.classList.remove('correct','wrong');item.setAttribute('aria-pressed',String(item===button));});
@@ -401,23 +514,34 @@ function debrief() {
   });
   $('#complete-mission').onclick=()=>{
     if($('#complete-mission').disabled)return;
+    if(remixMission){
+      practiceEntry().note=$('#reflection').value.trim();practiceEntry().completed=true;persist();updateTasks();showPracticeResult();return;
+    }
     profile.notes[mission.id]=$('#reflection').value.trim();
     if(!profile.completed.includes(mission.id))profile.completed.push(mission.id);
     let stars=3;
     if(session.hints>0)stars=2;
-    if(session.hints>=3)stars=1;
+    if(session.hintLevel>=3)stars=1;
     if(!profile.settings.practice&&session.elapsed>600)stars=Math.min(stars,2);
     const score={stars,hints:session.hints,commands:session.commands,seconds:Math.floor(session.elapsed)};
     const old=profile.scores[mission.id];
     if(!old||stars>old.stars||(stars===old.stars&&score.commands<old.commands))profile.scores[mission.id]=score;
     persist();
+    updateTasks();
     showResult(mission,score);
   };
 }
 function showResult(mission,score) {
   const last=allComplete(),next=current+1;
-  openDialog('<div class="eyebrow">'+(last?'HIKE TRAIL / FOUNDATION CLEARED':'ONE MORE STEP FORWARD')+'</div><h2 id="dialog-title">'+(last?'The valley has its signal back.':'That’s a proper little win.')+'</h2><div class="result-stars" aria-label="'+score.stars+' out of 3 stars">'+[1,2,3].map(number=>'<span class="'+(number<=score.stars?'earned':'')+'">✦</span>').join('')+'</div><p>'+escape(last?'You followed the clues, protected the people, and brought the tower back. Every foundation mission is cleared. You can revisit any Hike Trail stop. Office and Night Shift will open once their chapters are built and tested.':mission.quiz.explanation)+'</p><div class="result-stats"><div><strong>'+score.commands+'</strong><span>commands tried</span></div><div><strong>'+score.hints+'</strong><span>Patch nudges</span></div><div><strong>'+completedCount()+'/'+missions.length+'</strong><span>stops cleared</span></div></div><p class="muted">Stars reward independent practice. Hints help you learn, and every completed stop counts. Replay whenever you like.</p><button class="button primary" id="next-mission" data-testid="next-mission">'+(last?'Back to your adventure →':next<missions.length?'On to the next stop →':'Explore the trail →')+'</button>');
+  const world=updateWorld($('.mission-scene'),mission,session,true);
+  openDialog('<div class="eyebrow">'+(last?'HIKE TRAIL / FOUNDATION CLEARED':'ONE MORE STEP FORWARD')+'</div><h2 id="dialog-title">'+(last?'The valley has its signal back.':world.title)+'</h2><p class="field-return-message">'+escape(world.actor+': '+world.detail)+'</p><div class="result-stars" aria-label="'+score.stars+' out of 3 stars">'+[1,2,3].map(number=>'<span class="'+(number<=score.stars?'earned':'')+'">✦</span>').join('')+'</div><p>'+escape(last?'You followed the clues, protected the people, and brought the tower back. Every foundation mission is cleared. You can revisit any Hike Trail stop. Office and Night Shift will open once their chapters are built and tested.':mission.quiz.explanation)+'</p><div class="result-stats"><div><strong>'+score.commands+'</strong><span>commands tried</span></div><div><strong>'+score.hints+'</strong><span>Patch nudges</span></div><div><strong>'+completedCount()+'/'+missions.length+'</strong><span>stops cleared</span></div></div><p class="muted">Hints help you learn. Small nudges keep two stars; revealing a route gives one. Every completed stop counts. Try a fresh case whenever you like.</p><div class="setting-row"><button class="button primary" id="next-mission" data-testid="next-mission">'+(last?'Back to your adventure →':next<missions.length?'On to the next stop →':'Explore the trail →')+'</button><button class="button secondary" id="result-practice" data-testid="result-practice">Try fresh evidence ↻</button></div>');
   $('#next-mission').onclick=()=>{closeDialog();if(last)goHome();else if(next<missions.length)loadMission(next);else fieldMap();};
+  $('#result-practice').onclick=()=>startPractice();
+}
+function showPracticeResult() {
+  const world=updateWorld($('.mission-scene'),activeMission(),session,true);
+  openDialog('<div class="eyebrow">PRACTICE CASE '+remixMission.practiceVariant+' / CLEARED</div><h2 id="dialog-title">Fresh clues. Skills that stuck.</h2><p class="field-return-message">'+escape(world.actor+': '+world.detail)+'</p><p>'+escape(activeMission().quiz.explanation)+'</p><div class="result-stats"><div><strong>'+session.commands+'</strong><span>commands tried</span></div><div><strong>'+session.hints+'</strong><span>Patch nudges</span></div><div><strong>'+xp()+'</strong><span>journey XP preserved</span></div></div><p class="muted">Your practice case and reflection are saved separately. Your trail stars, notes, unlocks, and achievements stay with your journey.</p><div class="setting-row"><button class="button primary" id="result-practice-next" data-testid="result-practice-next">Try another case ↻</button><button class="button secondary" id="result-practice-exit" data-testid="result-practice-exit">Back to the trail stop →</button></div>');
+  $('#result-practice-next').onclick=()=>startPractice(true);$('#result-practice-exit').onclick=()=>{closeDialog();exitPractice();};
 }
 function fieldMap() {
   openDialog('<div class="eyebrow">THE WHOLE EXPEDITION</div><h2 id="dialog-title">Your way through the valley.</h2><p>One connected story. Four acts. Every cleared stop is yours to revisit.</p><div class="mission-grid-all">'+missions.map((mission,index)=>'<button class="mission-card '+(profile.completed.includes(mission.id)?'completed':'')+'" data-map-mission="'+index+'" '+(index>unlockedIndex()?'disabled':'')+'><span>STOP '+String(index+1).padStart(2,'0')+' '+(profile.completed.includes(mission.id)?'✓':index>unlockedIndex()?'⌁':'→')+'</span><strong>'+escape(mission.title)+'</strong><small>'+escape(mission.skills.join(' · '))+'</small></button>').join('')+'</div>');
@@ -476,6 +600,13 @@ document.addEventListener('keydown',event=>{
 });
 $('#dialog-backdrop').onclick=event=>{if(event.target===$('#dialog-backdrop'))closeDialog();};
 reduceMotion.addEventListener('change',applySettings);
+window.addEventListener('resize',syncKeyboardState);
+window.visualViewport?.addEventListener('resize',syncKeyboardState);
+document.addEventListener('focusin',syncKeyboardState);
+document.addEventListener('focusout',()=>requestAnimationFrame(syncKeyboardState));
+window.matchMedia('(max-width: 899px)').addEventListener('change',event=>{
+  if(view==='game'&&$('.trail-details'))$('.trail-details').open=!event.matches;
+});
 setInterval(()=>{
   const now=performance.now(),delta=Math.min((now-tickAt)/1000,2);tickAt=now;
   if(view==='game'&&session?.started&&!document.hidden&&!tutorial.isOpen()&&$('#dialog-backdrop').classList.contains('hidden')&&$('#cinematic-backdrop').classList.contains('hidden')&&!session.tasks.every(Boolean)){

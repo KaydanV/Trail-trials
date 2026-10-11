@@ -6,11 +6,11 @@ We’re building the foundation first. Hike Trail takes you from helping a sligh
 
 ## What’s playable
 
-- **Hike Trail:** 24 missions across four connected story acts, with illustrated locations, speaking Nova and Patch portraits, evidence-based terminal objectives, interactive decisions, animated story scenes, and short debriefs.
+- **Hike Trail:** 24 missions across four connected story acts, with illustrated locations that react to verified evidence, speaking Nova and Patch portraits, interactive decisions, animated story scenes, and short debriefs.
 - **The Office:** visible and locked. Planned workplace situations; implementation comes after the foundation is refined and tested.
 - **The Night Shift:** visible and locked. Planned realistic operations and time-sensitive tasks; implementation comes later.
 
-Finishing Hike Trail opens every foundation stop for replay. Office and Night Shift stay locked until their own chapters are built and validated. We can decide the wider difficulty and progression system when those chapters exist.
+Each completed stop offers practice remixes with fresh filenames and evidence. Some cases also change the correct decision, so read what you find. Resume the current case or generate another; practice progress and reflections save separately from trail XP, stars, unlocks, and notes. Finishing Hike Trail opens every foundation stop for replay. Office and Night Shift stay locked until their own chapters are built and validated.
 
 The foundation includes terminal navigation, files, evidence preservation, least privilege, account security, phishing, data handling, networks, DNS, secure web connections, integrity checks, patching, log analysis, and incident response. See [the curriculum map](docs/FOUNDATION.md) for what each mission practices and the limits of a browser simulation.
 
@@ -39,9 +39,11 @@ Three independent journeys save in browser storage, including in-progress files 
 
 V4 progress is preserved separately when migrated. The expanded foundation starts fresh because the missions and requirements have changed. Earlier notes and XP remain available in the field notebook; original V4 storage keys are left intact.
 
-Explore mode is untimed by default. The optional challenge mode records active time without stopping your mission. Story animation respects both the in-game setting and the device’s reduced-motion preference. Hints affect stars, never whether a completed mission counts.
+Explore mode is untimed by default. The optional challenge mode records active time without stopping your mission. Story animation respects both the in-game setting and the device’s reduced-motion preference. Hints affect stars, never whether a completed mission counts: gentle nudges retain two stars, while revealing a route gives one. The hint strength resets when you verify the current clue.
 
 Patch gives each journey a six-step guided introduction to the scene, objectives, terminal, hints, decisions, and progression. Its command previews are separate from the mission, and learning time pauses while the guide is open. Replay it whenever you like with **Show me around**. Command buttons explain their purpose before you run them; tapping Patch offers encouragement without using a hint.
+
+Patch follows the next unfinished objective and explains common command mistakes. The world responds to verified actions: receipts appear, routes unfold, gates change, and the final beacon lights after reflection. Staged requests remain visibly staged. On a phone, the terminal keeps your current objective nearby and a shortcut bar jumps between the scene, clues, terminal, and your decision.
 
 The visual direction uses expressive display lettering, deep forest and petrol atmosphere, warm amber actions, parchment evidence, and cyan terminal signals. Keep the world, characters, clues, and learning connected as we add more content. See [the design guide](docs/DESIGN_GUIDE.md) for the colours, fonts, scene composition, and interaction rules.
 
@@ -52,8 +54,11 @@ The visual direction uses expressive display lettering, deep forest and petrol a
 - `src/engine.js`: isolated teaching shell with structured evidence checks.
 - `src/storage.js`: validated saves, backups, and V4 migration.
 - `src/presentation.js`: scene and character mapping for every story frame, with illustrated evidence props.
+- `src/world.js`: evidence-driven scene changes and character responses.
+- `src/coach.js`: objective-aware hints and command failure explanations.
+- `src/practice.js`: fresh evidence cases for all 24 foundation stops.
 - `src/tutorial.js` and `src/tools.js`: Patch’s guided introduction and beginner command explanations.
-- `styles.css` and `assets/`: visual system and artwork.
+- `styles.css`, `styles/`, and `assets/`: visual system, responsive play controls, animated world layers, and artwork.
 - `tests/`: shell, save-system, curriculum, and browser regression checks.
 - `docs/v4-reference.html`: the uploaded readable V4 source, retained as a development reference.
 
@@ -65,4 +70,4 @@ Completing the trail demonstrates the game’s exercises, not professional certi
 
 ## Next, once the trail feels right
 
-Refine the foundation with beginner feedback, expand scene-specific animation and audio, and verify more browsers. Then build Office scenarios around everyday workplace needs. Night Shift follows with realistic priorities and time constraints. Keep the story, the terminal, and the reason for each action connected.
+Refine the foundation with observed beginner feedback, add optional audio, and verify more browsers. The [learning pace review](docs/PLAYTEST.md) records the content audit and the sessions still to run. Then build Office scenarios around everyday workplace needs. Night Shift follows with realistic priorities and time constraints. Keep the story, the terminal, and the reason for each action connected.
