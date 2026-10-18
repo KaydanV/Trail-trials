@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#081f28" />
+    <meta
+      name="description"
+      content="The Living Valley: a story-led cybersecurity foundation. Explore twelve chapters, investigate real clues in simulated tools, and prove your skills across 104 encounters."
+    />
+    <title>Terminal Trails — The Living Valley</title>
+    <link rel="icon" href="../assets/trail-mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="world.css" />
+  </head>
+  <body data-motion="on" data-text-size="normal">
+    <a class="skip-link" href="#main">Skip to the adventure</a>
+    <div id="app"></div>
+    <dialog id="dialog" aria-labelledby="dialog-title">
+      <button
+        type="button"
+        class="dialog-close"
+        data-action="close-dialog"
+        aria-label="Close dialog"
+      >
+        ×
+      </button>
+      <div id="dialog-content"></div>
+    </dialog>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <div
+      id="announcement"
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+    <noscript
+      >Enable JavaScript to play the Living Valley in your browser.</noscript
+    >
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

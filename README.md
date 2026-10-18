@@ -2,6 +2,24 @@
 
 A little adventure. A lot of real skills.
 
+**The new adventure is [The Living Valley](living-valley/).** It follows the expanded foundation blueprint: 92 learning missions grouped into 12 chapters, each ending in a connected boss investigation. Discovery teaches the tools, practice removes the supplied route, and proof encounters combine earlier skills. Verified findings drive character reactions and changes in the illustrated valley.
+
+The workbench includes a terminal, file explorer, network maps, an inbox/browser, evidence boards, timelines, field reports, a script workshop, and a fictional Windows workstation. Patch offers four strengths of help; the searchable journal keeps explanations and your actual fieldwork. Story scenes are skippable, larger text and reduced motion are supported, and mobile controls retain the same practical requirements.
+
+The [full foundation map](docs/LIVING_VALLEY_FOUNDATION.md) groups every encounter, prerequisite and reinforcement. Regenerate it with `npm run map:valley` after changing the authored curriculum.
+
+Living Valley has its own browser saves and export/import backups. The original 24-mission expedition remains at the repository root with its saves intact. Office and Night Shift are still in development. See [the Living Valley design](docs/LIVING_VALLEY_DESIGN.md), [implementation contract](docs/LIVING_VALLEY_CONTRACT.md), [completed original playtest](docs/LIVING_VALLEY_PLAYTEST.md), and [review-to-fix audit](docs/LIVING_VALLEY_REVIEW_AUDIT.md).
+
+After starting the server, open `/living-valley/` for the new adventure. Its checks are:
+
+```sh
+npm run check:valley
+npm run test:valley
+npm run test:valley:browser
+```
+
+The following describes the preserved original expedition.
+
 We’re building the foundation first. Hike Trail takes you from helping a slightly chaotic robot find its feet to investigating a broken mountain signal network. You follow the story, use the terminal, collect evidence, and make a call. The learning happens while you’re figuring things out.
 
 ## What’s playable
