@@ -22,6 +22,27 @@ import {
 } from "./runtime.js";
 import { makeReviewMission } from "./review.js";
 import { renderMap, renderScene, renderPortrait } from "./world.js";
+import {
+  renderPlayWorld,
+  mountPlayWorld,
+  renderGearIcon,
+} from "./play-world.js";
+import { renderPlayActivity, mountPlayActivity } from "./play-tools.js";
+import { getPlayScene, tutorialBeats } from "./play-script.js";
+import {
+  createPlayState,
+  loadPlayState,
+  savePlayState,
+  validatePlayState,
+  syncPlayRewards,
+  interactPlay,
+  equipPlayItem,
+  resetPlayMission,
+  movePlayPlayer,
+  advancePlayTutorial,
+  catalog,
+  MAX_PLAY_BYTES,
+} from "./play-state.js";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -34,13 +55,13 @@ const esc = (value) =>
       ],
   );
 const toolNames = {
-  terminal: "Field terminal",
-  explorer: "File explorer",
-  network: "Network map",
-  browser: "Browser & inbox",
-  evidence: "Evidence board",
+  terminal: "Pocket console",
+  explorer: "Workbench",
+  network: "Signal rig",
+  browser: "Mail satchel",
+  evidence: "Clue board",
   windows: "Ranger workstation",
-  script: "Script workshop",
+  script: "Tinker’s bench",
   dialogue: "Talk it through",
 };
 const toolIcons = {
@@ -59,6 +80,15 @@ try {
 } catch {}
 const storage = createStorage(missions, backend);
 let profile = storage.read();
+const restoredPlay = loadPlayState(backend, profile);
+let play = restoredPlay.state;
+let playRecoveryRequired = !!restoredPlay.error;
+let introIndex = 0;
+let gamePanel = null,
+  chatter = null,
+  worldCleanup = null,
+  toolsCleanup = null;
+
 let view = "home",
   chapterId = 1,
   active = null,
@@ -67,7 +97,6 @@ let view = "home",
   busy = false,
   reviewing = false;
 let storyFrame = 0,
-  tourStep = 0,
   lastResponse = "",
   quizIndex = 0,
   quizFeedback = null,
@@ -102,11 +131,60 @@ function persist() {
     else profile.sessions[active.id] = session;
   }
   profile.updatedAt = new Date().toISOString();
+  persistPlay();
   try {
     storage.write(profile);
   } catch (error) {
     toast(error.message);
   }
+}
+function persistPlay() {
+  if (playRecoveryRequired) return;
+  syncPlayRewards(play, profile);
+  const result = savePlayState(backend, play, profile);
+  if (result?.error)
+    console.warn("Adventure accessories are using temporary storage.");
+}
+function syncTutorial() {
+  if (active?.id !== "c01-01") return;
+  if (play.tutorialStage === 4 && session.done[0])
+    advancePlayTutorial(play, "fit-part");
+  if (play.tutorialStage === 5 && session.done[1])
+    advancePlayTutorial(play, "talk-nova");
+}
+function playLine() {
+  if (chatter) return chatter;
+  if (active?.id === "c01-01" && play.tutorialStage < 6) {
+    const beat = tutorialBeats[play.tutorialStage];
+    return {
+      speaker: beat?.speaker || "PATCH",
+      text: beat?.text || "Try something. I have a tiny fire extinguisher.",
+    };
+  }
+  return { speaker: "PATCH", text: getPlayScene(active, session).goal };
+}
+function renderSpeech() {
+  const original = playLine();
+  const actor = String(original.text || "").match(/^(PATCH|PATCHES|NOVA|OWL|BRAMBLE|TESSA):\s*/i);
+  const line = actor ? {speaker:actor[1].toUpperCase(),text:original.text.slice(actor[0].length)} : original;
+  return (
+    renderPortrait(line.speaker || "PATCH", "speaking") +
+    '<div><span class="eyebrow">' +
+    esc(line.speaker || "PATCH") +
+    " / LIVE FROM THE TRAIL</span><p>" +
+    esc(line.text) +
+    "</p></div>"
+  );
+}
+function updateSpeech() {
+  const speech = $(".play-speech-copy");
+  if (speech) speech.innerHTML = renderSpeech();
+  const tutorial = $(".play-tutorial-count");
+  if (tutorial)
+    tutorial.textContent =
+      play.tutorialStage < 6
+        ? "Getting our feet dirty · " + (play.tutorialStage + 1) + "/6"
+        : "";
 }
 function applySettings() {
   document.body.dataset.motion =
@@ -162,6 +240,11 @@ function footer() {
   );
 }
 function render() {
+  worldCleanup?.();
+  worldCleanup = null;
+  toolsCleanup?.();
+  toolsCleanup = null;
+  document.body.dataset.view = view;
   applySettings();
   if (view === "mission" && active) renderMission();
   else if (view === "chapter") renderChapter();
@@ -290,6 +373,8 @@ function openMission(id, practice = false) {
     return toast(
       "Follow the earlier encounters to open this part of the trail.",
     );
+  worldCleanup?.();
+  worldCleanup = null;
   if (active && session) persist();
   reviewing = practice;
   if (practice) {
@@ -315,10 +400,15 @@ function openMission(id, practice = false) {
   view = "mission";
   activeTool = stepNow()?.tool || "terminal";
   lastResponse = "";
+  window.scrollTo({ top: 0, behavior: "instant" });
+  resetPlayMission(play, active.id);
+  syncTutorial();
+  gamePanel = null;
+  introIndex=1;
+  chatter=active.id==="c01-01"&&play.tutorialStage<6?null:getPlayScene(active,session).intro?.[0]||null;
+  session.started = true;
   persist();
   render();
-  window.scrollTo({ top: 0, behavior: "instant" });
-  if (!session.started) showStory();
 }
 function stageTools() {
   return [
@@ -333,124 +423,208 @@ function stageTools() {
   ];
 }
 function renderMission() {
+  syncTutorial();
   const index = readyStep(),
-    step = active.steps[index],
-    count = session.done.filter(Boolean).length,
-    chapter = chapterOf(active);
-  const last = count ? active.steps[session.done.lastIndexOf(true)] : null;
-  const learningPhase = step?.phase || active.phase;
+    step = stepNow(),
+    scene = getPlayScene(active, session);
+  const done = session.done.filter(Boolean).length;
   $("#app").innerHTML =
     header() +
-    '<main id="main" class="mission-page" tabindex="-1"><div class="mission-topline">' +
-    button("← The valley", "home", "", "text-button") +
-    "<span>CHAPTER " +
+    '<main id="main" class="play-page" tabindex="-1"><div class="play-topbar">' +
+    button("← Valley map", "home", "", "play-map-button") +
+    '<div><span class="eyebrow">CHAPTER ' +
     active.chapter +
-    " · " +
-    esc(phaseNames[active.phase]) +
-    "</span><span>" +
-    esc(active.location) +
-    "</span></div>" +
-    (reviewing
-      ? '<aside class="return-banner"><strong>RETURN TRIP / CASE ' +
-        active.reviewVariant +
-        "</strong><p>New paths. The same skill. Your story achievements stay saved separately.</p></aside>"
+    (reviewing ? " · RETURN TRIP" : "") +
+    "</span><h1>" +
+    esc(scene.title || active.title) +
+    '</h1></div><div class="play-wallet" aria-label="Acorns">' +
+    play.coins +
+    " <span>acorns</span></div>" +
+    (profile.settings.timer
+      ? '<span class="play-clock">Your pace · <time id="practice-clock">' +
+        formatClock(session.elapsed) +
+        "</time></span>"
       : "") +
-    '<section class="adventure-stage">' +
-    renderScene(active, session, chapter) +
-    '<div class="stage-brief"><div class="eyebrow">' +
-    esc(chapter.title) +
-    "</div><h1>" +
-    esc(active.title) +
-    "</h1><p>" +
-    esc(active.briefing.plain) +
-    '</p><div class="brief-actions">' +
-    button("▷ Replay story", "story", "", "small-button") +
-    button("Show me around", "how-to", "", "small-button") +
-    '</div><details class="brief-details"><summary>Why we’re here</summary><p>' +
-    esc(active.briefing.why) +
-    "</p><p><strong>In the field:</strong> " +
-    esc(active.briefing.when) +
-    "</p></details></div></section>" +
-    renderBossEncounter() +
-    '<div class="play-layout"><aside class="mission-rail"><section class="objectives-card" tabindex="-1"><div class="card-heading"><h2>The trail ahead</h2><span>' +
-    count +
-    " / " +
-    active.steps.length +
-    '</span></div><ol class="objectives">' +
+    '</div><div class="play-stage-wrap"><div id="game-world">' +
+    renderPlayWorld(active, session, play, chapterOf(active)) +
+    '</div><div class="play-quest"><span>' +
+    (active.phase === "boss" ? "BOSS ENCOUNTER" : "ON THE TRAIL") +
+    '</span><button data-game-action="gadget" data-testid="current-objective">' +
+    esc(step ? scene.goal : "The beacon is ready. Let Nova know.") +
+    '</button><div class="play-progress" aria-label="Verified discoveries">' +
     active.steps
       .map(
         (task, i) =>
-          '<li class="' +
-          (session.done[i] ? "done" : i === index ? "current" : "future") +
-          '" data-testid="objective-' +
+          '<span data-testid="objective-' +
           i +
           '" data-complete="' +
           session.done[i] +
-          '"><span class="objective-dot">' +
-          (session.done[i] ? "✓" : i + 1) +
-          "</span><div><strong>" +
+          '" class="' +
+          (session.done[i] ? "lit" : "") +
+          '" title="' +
           esc(task.title) +
-          "</strong>" +
-          (i === index ? "<p>" + esc(task.prompt) + "</p>" : "") +
-          "</div></li>",
+          '">' +
+          (session.done[i] ? "✓" : "·") +
+          "</span>",
       )
       .join("") +
-    '</ol></section><section class="patch-card" id="patch" tabindex="-1"><div class="patch-heading">' +
-    renderPortrait("PATCH", lastResponse ? "thinking" : "idle") +
-    '<div><span class="eyebrow">COMPANION CHANNEL</span><h2>Patch has your back.</h2></div></div><p id="patch-response" role="status">' +
-    esc(
-      lastResponse ||
-        (step
-          ? "One question at a time. We are figuring out " +
-            step.title.toLowerCase() +
-            "."
-          : "Every clue is checked. Let’s tell Nova what we found."),
-    ) +
-    '</p><div class="hint-strengths"><span>Think</span><span>Concept</span><span>Location</span><span>Syntax</span></div>' +
-    button(
-      step ? "Ask Patch for a nudge" : "All clues checked",
-      "hint",
-      'data-testid="ask-patch" ' + (!step ? "disabled" : ""),
-      "secondary",
-    ) +
-    '<small>Help is always welcome. We record assisted and independent attempts separately.</small></section></aside><section class="workbench">' +
-    (last ? renderFeedback(last) : "") +
-    '<div class="workbench-heading"><div><span class="eyebrow">' +
-    (step ? "YOUR NEXT DISCOVERY" : "EVIDENCE COLLECTED") +
-    '</span><h2 data-testid="current-objective">' +
-    esc(step?.title || "Tell the valley what you found.") +
-    '</h2></div><span class="phase-chip">' +
-    esc(phaseNames[learningPhase]) +
-    "</span></div>" +
-    (step
-      ? '<div class="current-context"><p>' +
-        esc(step.prompt) +
-        "</p>" +
-        (learningPhase === "discover"
-          ? '<div class="lesson-note"><strong>' +
-            esc(step.teaching.plain) +
-            "</strong><p>" +
-            esc(step.teaching.meaning) +
-            "</p>" +
-            (step.teaching.syntax
-              ? "<code>" + esc(step.teaching.syntax) + "</code>"
-              : "") +
-            "</div>"
-          : '<details class="recall-note"><summary>Recall the idea</summary><p>' +
-            esc(step.teaching.plain) +
-            "</p><p>" +
-            esc(step.teaching.when) +
-            "</p></details>") +
-        "</div>"
+    '</div></div><div class="play-speech"><div class="play-speech-copy" id="patch-response">' +
+    renderSpeech() +
+    '</div><div class="play-speech-actions">' +
+    button("Say that again", "game-banter", "", "small-button") +
+    '<button type="button" class="button small-button" data-game-action="hint" data-testid="ask-patch">A tiny nudge?</button>' +
+    (active.id === "c01-01" && play.tutorialStage < 6 ? '<button type="button" class="button small-button" data-game-action="skip-guide">Skip guide</button>' : '') +
+    '</div><small class="play-tutorial-count">' +
+    (active.id === "c01-01" && play.tutorialStage < 6
+      ? "Getting our feet dirty · " + (play.tutorialStage + 1) + "/6"
       : "") +
-    '<nav class="tool-tabs" aria-label="Field tools">' +
+    '</small></div></div><nav class="play-belt" aria-label="Your adventure kit"><button data-game-action="pack" data-testid="pack"><span aria-hidden="true">▣</span> Backpack</button><button data-game-action="gadget" data-testid="open-gadget"><span aria-hidden="true">⌁</span> ' +
+    (step ? esc(toolNames[step.tool] || "Gadget") : "Beacon ready") +
+    '</button><button data-action="journal"><span aria-hidden="true">▤</span> Notebook</button><button data-game-action="nova" data-testid="finish-encounter" ' +
+    (!session.done.every(Boolean) ? "disabled" : "") +
+    '><span aria-hidden="true">✦</span> ' +
+    (session.completed ? "Next stop" : "Talk to Nova") +
+    "</button></nav>" +
+    renderGamePanel(step, index) +
+    "</main>";
+  worldCleanup = mountPlayWorld($("#game-world"), {
+    motion: document.body.dataset.motion !== "off",
+    onPosition: (position) => {
+      const before = play.tutorialStage;
+      movePlayPlayer(play, position.x, position.y);
+      persistPlay();
+      if (before !== play.tutorialStage) {
+        chatter = null;
+        updateSpeech();
+        announce(playLine().text);
+      }
+    },
+    onInteract: worldInteract,
+  });
+  const toolSurface = $(".tool-surface");
+  if (toolSurface)
+    toolsCleanup = mountPlayActivity($("#app"), {
+      onInspect: (id) =>
+        handleActivity(inspectItem(active, session, readyStep(), id)),
+      onChoose: (id) =>
+        handleActivity(
+          submitActivity(active, session, readyStep(), { choice: id }),
+        ),
+      onClassify: (item, category) => {
+        draftFor(readyStep()).classifications[item] = category;
+        render();
+      },
+      onSequenceAdd: (id) => {
+        const draft = draftFor(readyStep());
+        if (!draft.order.includes(id)) draft.order.push(id);
+        render();
+      },
+      onSequenceRemove: (id) => {
+        const draft = draftFor(readyStep());
+        draft.order = draft.order.filter((item) => item !== id);
+        render();
+      },
+      onDraftField: (id, value) => {
+        if (id === "__repair__") draftFor(readyStep()).text = value;
+        else draftFor(readyStep()).fields[id] = value;
+      },
+      onSubmit: () =>
+        handleActivity(
+          submitActivity(active, session, readyStep(), draftFor(readyStep())),
+        ),
+    });
+  const output = $("#terminal-output");
+  if (output) output.scrollTop = output.scrollHeight;
+  if (gamePanel)
+    queueMicrotask(() => {
+      if (
+        document.activeElement === document.body ||
+        document.activeElement === $("#main") ||
+        !document.activeElement?.isConnected
+      )
+        $('[data-testid="close-game-panel"]')?.focus({ preventScroll: true });
+    });
+}
+function renderGamePanel(step, index) {
+  if (!gamePanel) return "";
+  if (gamePanel === "pack")
+    return (
+      '<aside id="game-panel" class="play-panel pack-panel" role="dialog" aria-modal="true" aria-label="Your backpack"><header><div><span class="eyebrow">POCKET-SIZED NONSENSE</span><h2>Your backpack</h2></div><button data-game-action="close-panel" data-testid="close-game-panel" aria-label="Close backpack">×</button></header><p>Try a new look. Patch insists the antenna improves biscuit reception.</p><div class="pack-grid">' +
+      catalog
+        .map((item) => {
+          const owned = play.bag.includes(item.id),
+            equipped = Object.values(play.equipped).includes(item.id);
+          return (
+            '<article class="pack-item ' +
+            (equipped ? "equipped" : "") +
+            '"><span class="pack-illustration" data-gear="' +
+            esc(item.id) +
+            '" aria-hidden="true">' +
+            renderGearIcon(item.id) +
+            "</span><h3>" +
+            esc(item.label || item.name || item.id) +
+            "</h3><p>" +
+            esc(
+              item.description || "A tiny piece of the valley for your pocket.",
+            ) +
+            '</p><button data-game-action="equip" data-item="' +
+            esc(item.id) +
+            '" data-testid="equip-' +
+            esc(item.id) +
+            '" ' +
+            (item.slot === "kit" || (!owned && (item.award || item.cache))
+              ? "disabled"
+              : "") +
+            ">" +
+            (equipped
+              ? "Wearing it"
+              : item.slot === "kit"
+                ? owned
+                  ? "In your kit"
+                  : "Find on the trail"
+                : owned
+                  ? "Equip"
+                  : item.award
+                    ? "Chapter souvenir"
+                    : item.cache
+                      ? "Find on the trail"
+                      : "Get for " + item.price + " acorns") +
+            "</button></article>"
+          );
+        })
+        .join("") +
+      "</div></aside>"
+    );
+  const phase = step?.phase || active.phase;
+  return (
+    '<aside id="game-panel" class="play-panel gadget-panel workbench" role="dialog" aria-modal="true" aria-label="Field gadget"><header><div><span class="eyebrow">FROM YOUR TOOLKIT</span><h2>' +
+    esc(step?.activity?.heading || toolNames[activeTool] || "Field gadget") +
+    '</h2></div><button data-game-action="close-panel" data-testid="close-game-panel" aria-label="Put gadget away">×</button></header>' +
+    (step
+      ? '<p class="gadget-cue">' +
+        esc(getPlayScene(active, session).current?.prompt || step.prompt) +
+        '</p><details class="gadget-how"><summary>Patch, how does this thing work?</summary><p>' +
+        esc(step.teaching.plain) +
+        "</p><p>" +
+        esc(step.teaching.meaning) +
+        "</p>" +
+        (phase === "discover" && step.teaching.syntax
+          ? "<code>" + esc(step.teaching.syntax) + "</code>"
+          : "") +
+        "</details>"
+      : "<p>The trail is waiting. Nova is beside the beacon.</p>") +
+    (lastResponse
+      ? '<div class="gadget-reaction" role="status">' +
+        renderPortrait("PATCH", "thinking") +
+        "<p>" +
+        esc(lastResponse) +
+        "</p></div>"
+      : "") +
+    '<nav class="tool-tabs" aria-label="Gadgets">' +
     stageTools()
       .map((tool) =>
         button(
-          '<span aria-hidden="true">' +
-            toolIcons[tool] +
-            "</span>" +
-            esc(toolNames[tool] || tool),
+          esc(toolNames[tool] || tool),
           "tool",
           'data-tool="' +
             tool +
@@ -461,40 +635,129 @@ function renderMission() {
         ),
       )
       .join("") +
-    '</nav><section class="tool-surface" data-tool="' +
+    '</nav><section class="tool-surface" tabindex="-1" data-tool="' +
     activeTool +
-    '" tabindex="-1">' +
+    '">' +
     renderTool(step, index) +
-    '</section><div class="mission-finish">' +
-    (profile.settings.timer
-      ? '<span class="practice-clock">Your pace · <time id="practice-clock">' +
-        formatClock(session.elapsed) +
-        "</time> active time · No deadline</span>"
+    "</section>" +
+    (!step
+      ? button(
+          "Call Nova →",
+          "reflect",
+          'data-testid="finish-gadget"',
+          "primary",
+        )
       : "") +
-    "<p>" +
-    esc(
-      step
-        ? "Follow the result. Find the next clue. You have time."
-        : active.debrief,
-    ) +
-    "</p>" +
-    button(
-      "Talk it through with Nova →",
-      "reflect",
-      'data-testid="finish-encounter" ' + (step ? "disabled" : ""),
-      "primary",
-    ) +
-    '</div></section></div><section class="field-translation"><span class="eyebrow">PLAIN WORDS → PROFESSIONAL WORDS</span><p>' +
-    esc(active.briefing.professional) +
-    '</p></section></main><nav class="field-dock" aria-label="Quick field navigation">' +
-    button("Scene", "jump", 'data-region=".adventure-stage"') +
-    button("Clues", "jump", 'data-region=".objectives-card"') +
-    button("Tools", "jump", 'data-region=".workbench"') +
-    button("Patch", "jump", 'data-region="#patch"') +
-    "</nav>" +
-    footer();
-  const output = $("#terminal-output");
-  if (output) output.scrollTop = output.scrollHeight;
+    "</aside>"
+  );
+}
+function worldInteract(id) {
+  if (busy) return;
+  if (id === "map" || id === "exit") {
+    if (id === "exit" && session.completed)
+      return openMission(
+        missions[Math.min(completeIds().length, missions.length - 1)].id,
+      );
+    if (id === "exit" && !session.completed) {
+      chatter = {
+        speaker: "PATCH",
+        text: "I tried leaving dramatically. The problem followed me. Let’s get this place working first.",
+      };
+      render();
+      return;
+    }
+    view = "chapter";
+    render();
+    return;
+  }
+  if (id === "inventory") {
+    gamePanel = "pack";
+    render();
+    return;
+  }
+  if (id === "patch") {
+    const result = interactPlay(play, active, "patch");
+    chatter = {
+      speaker: "PATCH",
+      text:
+        result.message ||
+        getPlayScene(active, session).banter?.[0] ||
+        "I have a plan. It contains at least one sensible step.",
+    };
+    if (active.id === "c01-01" && play.tutorialStage < 6) chatter = null;
+    persistPlay();
+    render();
+    return;
+  }
+  if (id === "cache") {
+    const result = interactPlay(play, active, "cache");
+    chatter = {
+      speaker: "PATCH",
+      text:
+        result.message || "A spare part! Or an extremely ambitious biscuit.",
+    };
+    syncTutorial();
+    persistPlay();
+    sound();
+    render();
+    return;
+  }
+  if (id === "nova" || id === "beacon") {
+    if (session.completed) {
+      chatter = {
+        speaker: "NOVA",
+        text: "This stop is safely recorded. The next bit of the trail is yours.",
+      };
+      render();
+      return;
+    }
+    if (session.done.every(Boolean)) return showReflection();
+    if (active.id === "c01-01" && session.done[0]) {
+      activeTool = stepNow().tool;
+      gamePanel = "tools";
+      chatter = {
+        speaker: "NOVA",
+        text: "The computer is alive! One thing before we go: this badge is for our training trail. Have a look at the note.",
+      };
+      render();
+      return;
+    }
+    chatter = {
+      speaker: "NOVA",
+      text: "I’m by the beacon. Patch has the gadget you need—give that problem a poke first.",
+    };
+    render();
+    return;
+  }
+  if (active.id === "c01-01" && readyStep() === 0 && id.startsWith("artifact:")) {
+    const item = id.slice(9);
+    const result = inspectItem(active, session, 0, item);
+    if (result.ok) {
+      const lines = {
+        screen: "The screen was hiding in the fern. A bold camouflage strategy for something that glows.",
+        linux: "Linux recovered. Patch calls it the brain. The penguin has declined to comment.",
+        viewer: "One map viewer, rescued. It can open a route; it cannot carry your sandwiches.",
+        route: "The route file is safe. It weighs no more after collecting. Patch finds this deeply suspicious.",
+      };
+      chatter = { speaker: "PATCH", text: lines[item] || "One useful piece, safely in the kit." };
+      sound();
+      persist();
+      render();
+    }
+    return;
+  }
+  if (id === "terminal" || id === "objective" || id.startsWith("artifact:")) {
+    gamePanel = "tools";
+    activeTool = id === "terminal" ? "terminal" : stepNow()?.tool || "terminal";
+    chatter = null;
+    render();
+    if (id.startsWith("artifact:")) {
+      const item = id.slice(9);
+      $('[data-testid="inspect-' + CSS.escape(item) + '"]')?.focus({
+        preventScroll: true,
+      });
+    }
+  }
 }
 function renderBossEncounter() {
   if (active.phase !== "boss") return "";
@@ -781,247 +1044,12 @@ function draftFor(index) {
   return drafts.get(key);
 }
 function renderActivity(step, index) {
-  const activity = step.activity,
-    draft = draftFor(index),
-    inspected = session.activity?.[index]?.inspected || [];
-  let html =
-    '<div class="activity-heading"><span class="tool-symbol" aria-hidden="true">' +
-    (toolIcons[activeTool] || "⌑") +
-    "</span><div><h3>" +
-    esc(activity.heading) +
-    "</h3><p>" +
-    esc(activity.instructions) +
-    "</p></div></div>";
-  if (activeTool === "browser")
-    html +=
-      '<div class="browser-address"><span>◉</span><span>Valley training browser · inspect before you trust</span></div>';
-  if (activeTool === "windows")
-    html +=
-      '<div class="workstation-bar"><span>⊞ RANGER PC</span><span>Local training workstation</span></div>';
-  if (
-    !["inspect", "choose", "compare"].includes(activity.kind) &&
-    (activity.requiredInspect || []).length
-  ) {
-    html +=
-      '<div class="supporting-sources"><h4>Check the source material first</h4>' +
-      (activity.items || [])
-        .filter((item) => activity.requiredInspect.includes(item.id))
-        .map(
-          (item) =>
-            '<article class="artifact ' +
-            (inspected.includes(item.id) ? "opened" : "") +
-            '">' +
-            button(
-              esc(item.label) +
-                (inspected.includes(item.id) ? " · ✓ Inspected" : " · Inspect"),
-              "inspect",
-              'data-item="' +
-                item.id +
-                '" data-testid="inspect-' +
-                item.id +
-                '"',
-              "artifact-open",
-            ) +
-            (inspected.includes(item.id)
-              ? '<div class="artifact-content">' + esc(item.detail) + "</div>"
-              : "") +
-            "</article>",
-        )
-        .join("") +
-      "</div>";
-  }
-  if (activity.kind === "sequence" || activity.kind === "connect") {
-    html +=
-      '<div class="sequence-board"><div class="evidence-pool"><h4>' +
-      (activity.kind === "connect"
-        ? "Available network points"
-        : "Unsorted evidence") +
-      "</h4>" +
-      activity.items
-        .map((item) =>
-          button(
-            "<strong>" +
-              esc(item.label) +
-              "</strong><span>" +
-              esc(item.detail) +
-              "</span>",
-            "sequence-add",
-            'data-item="' +
-              item.id +
-              '" ' +
-              (draft.order.includes(item.id) ? "disabled" : ""),
-            "evidence-tile",
-          ),
-        )
-        .join("") +
-      '</div><div class="ordered-evidence"><h4>' +
-      (activity.kind === "connect" ? "Your route" : "Your timeline") +
-      "</h4><ol>" +
-      draft.order
-        .map(
-          (id) =>
-            "<li>" +
-            esc(activity.items.find((item) => item.id === id)?.label) +
-            button(
-              "×",
-              "sequence-remove",
-              'data-item="' + id + '" aria-label="Remove this item"',
-              "icon-button",
-            ) +
-            "</li>",
-        )
-        .join("") +
-      "</ol>" +
-      button(
-        "Check " + (activity.kind === "connect" ? "the route" : "the sequence"),
-        "submit-activity",
-        'data-testid="submit-activity"',
-        "primary",
-      ) +
-      "</div></div>";
-  } else if (activity.kind === "classify") {
-    html +=
-      '<div class="classify-board">' +
-      activity.items
-        .map(
-          (item) =>
-            '<article class="classify-card"><h4>' +
-            esc(item.label) +
-            "</h4><p>" +
-            esc(item.detail) +
-            '</p><label>Place this evidence<select data-category="' +
-            item.id +
-            '"><option value="">Choose a category…</option>' +
-            (activity.categories || [])
-              .map(
-                (category) =>
-                  '<option value="' +
-                  category.id +
-                  '" ' +
-                  (draft.classifications[item.id] === category.id
-                    ? "selected"
-                    : "") +
-                  ">" +
-                  esc(category.label) +
-                  "</option>",
-              )
-              .join("") +
-            "</select></label></article>",
-        )
-        .join("") +
-      "</div>" +
-      button(
-        "Check the evidence",
-        "submit-activity",
-        'data-testid="submit-activity"',
-        "primary",
-      );
-  } else if (activity.kind === "report") {
-    html +=
-      '<div class="report-board">' +
-      (activity.items || [])
-        .map(
-          (item) =>
-            '<article class="report-evidence"><h4>' +
-            esc(item.label) +
-            "</h4><p>" +
-            esc(item.detail) +
-            "</p></article>",
-        )
-        .join("") +
-      (activity.fields || [])
-        .map(
-          (field) =>
-            "<label>" +
-            esc(field.label) +
-            "<small>" +
-            esc(field.hint || "Use the evidence you can support.") +
-            '</small><textarea data-report-field="' +
-            field.id +
-            '" rows="3">' +
-            esc(draft.fields[field.id] || "") +
-            "</textarea></label>",
-        )
-        .join("") +
-      "</div>" +
-      button(
-        "Send your field report",
-        "submit-activity",
-        'data-testid="submit-activity"',
-        "primary",
-      );
-  } else if (activity.kind === "repair") {
-    html +=
-      '<label class="script-label">Inspect and edit the text<textarea class="code-editor" data-repair-text rows="9" spellcheck="false">' +
-      esc(draft.text) +
-      '</textarea></label><p class="tool-instruction">This check reviews the text. Executable scripts are run separately in the field terminal.</p>' +
-      button(
-        "Check the revision",
-        "submit-activity",
-        'data-testid="submit-activity"',
-        "primary",
-      );
-  } else {
-    html +=
-      '<div class="evidence-cards">' +
-      (activity.items || [])
-        .map(
-          (item) =>
-            '<article class="artifact ' +
-            (inspected.includes(item.id) ? "opened" : "") +
-            '">' +
-            button(
-              '<span class="artifact-icon" aria-hidden="true">' +
-                (activeTool === "network"
-                  ? "◈"
-                  : activeTool === "browser"
-                    ? "✉"
-                    : "▤") +
-                "</span><strong>" +
-                esc(item.label) +
-                "</strong><span>" +
-                (inspected.includes(item.id) ? "✓ Inspected" : "Inspect") +
-                "</span>",
-              "inspect",
-              'data-item="' +
-                item.id +
-                '" data-testid="inspect-' +
-                item.id +
-                '"',
-              "artifact-open",
-            ) +
-            (inspected.includes(item.id)
-              ? '<div class="artifact-content">' + esc(item.detail) + "</div>"
-              : "") +
-            "</article>",
-        )
-        .join("") +
-      "</div>";
-    if (activity.choices)
-      html +=
-        '<div class="field-choices"><h4>Your move</h4>' +
-        activity.choices
-          .map((choice) =>
-            button(
-              esc(choice.label),
-              "activity-choice",
-              'data-choice="' +
-                choice.id +
-                '" data-testid="choice-' +
-                choice.id +
-                '"',
-              "choice-button",
-            ),
-          )
-          .join("") +
-        "</div>";
-  }
-  if (lastResponse)
-    html +=
-      '<p class="activity-response" role="status">' +
-      esc(lastResponse) +
-      "</p>";
-  return html;
+  return renderPlayActivity(step, index, {
+    draft: draftFor(index),
+    inspected: session.activity?.[index]?.inspected || [],
+    lastResponse,
+    mission: active,
+  });
 }
 function renderScriptEditor() {
   const scripts = Object.keys(session.shell.files).filter((path) =>
@@ -1109,6 +1137,14 @@ function revealInput(input = $("#terminal-input")) {
   if (dock?.getClientRects().length)
     bottom = Math.min(bottom, dock.getBoundingClientRect().top - 12);
   const box = input.getBoundingClientRect();
+  const panel = input.closest("#game-panel");
+  if (panel) {
+    panel.style.maxHeight =
+      Math.max(160, (viewport?.height || innerHeight) - 18) + "px";
+    if (box.bottom > bottom) panel.scrollTop += box.bottom - bottom + 18;
+    else if (box.top < top) panel.scrollTop -= top - box.top + 18;
+    return;
+  }
   if (box.top < top || box.bottom > bottom)
     window.scrollTo({
       top: Math.max(0, scrollY + box.top + box.height / 2 - (top + bottom) / 2),
@@ -1224,7 +1260,7 @@ function closeDialog() {
   const kind = dialog.dataset.kind;
   dialog.close();
   dialog.removeAttribute("data-kind");
-  if (kind === "settings" && view === "mission") renderMission();
+  if (kind === "settings" && view === "mission") render();
   if (
     dialogOrigin?.isConnected &&
     !dialog.contains(dialogOrigin) &&
@@ -1293,8 +1329,10 @@ function endStory() {
   afterStory = null;
   closeDialog();
   if (after) return after();
-  if (mode === "intro" && !session.started && currentIndex() === 0) showTour();
-  else {
+  if (mode === "intro" && !session.started && currentIndex() === 0) {
+    session.started = true;
+    persist();
+  } else {
     session.started = true;
     persist();
   }
@@ -1314,68 +1352,52 @@ function endTour() {
     $(".workbench")?.scrollIntoView({ block: "start", behavior: "instant" });
 }
 function showStepBeat(index) {
+  lastResponse = "";
   const frames = (active.beats || []).filter(
-    (beat) => beat.after === active.steps[index]?.id,
+    (frame) => frame.after === active.steps[index]?.id,
   );
-  if (frames.length) showStory(frames, "beat");
+  const frame = frames[0],
+    playful = getPlayScene(active, session).steps?.[active.steps[index]?.id];
+  if (playful?.success) {
+    chatter = {
+      speaker: active.steps[index].feedback.speaker || "PATCH",
+      text: playful.success,
+    };
+    gamePanel = null;
+    syncTutorial();
+    persistPlay();
+    render();
+    announce(chatter.text);
+    return;
+  }
+  chatter = frame
+    ? { speaker: frame.speaker, text: frame.text }
+    : {
+        speaker: active.steps[index].feedback.speaker,
+        text: active.steps[index].feedback.text,
+      };
+  gamePanel = null;
+  syncTutorial();
+  persistPlay();
+  render();
+  announce(chatter.text);
 }
-const tour = [
-  [
-    "A place with a reason.",
-    "The scene shows what is happening in the valley. Click its objects to open your briefing, tools, Patch, and journal. Your actions change the scene only after evidence is verified.",
-    ".adventure-stage",
-  ],
-  [
-    "A problem, then a clue.",
-    "The trail ahead tells you what to achieve. In discovery lessons, we explain the tool and show its syntax. Later, the goal stays while the command hints fade.",
-    ".objectives-card",
-  ],
-  [
-    "Your kit is bigger than a terminal.",
-    "Use the tabs for files, network maps, email, evidence, Windows, and scripts when the story calls for them. Read the result of each action. It will tell you why it mattered.",
-    ".workbench",
-  ],
-  [
-    "Ask a good question.",
-    "Patch starts with a question, then the concept, then a place to look, and finally exact syntax. Help never locks you out. We keep independent demonstrations separate from assisted attempts.",
-    "#patch",
-  ],
-  [
-    "Make the learning yours.",
-    "Finish the practical work, explain your conclusions to Nova, and leave a note. Your journal keeps concepts and demonstrations. Return trips change paths and let you try again without changing story progress.",
-    ".mission-finish",
-  ],
-];
 function showTour() {
-  tourStep = 0;
-  renderTour();
-}
-function renderTour() {
-  const [title, copy, target] = tour[tourStep];
-  if (view === "mission")
-    $(target)?.scrollIntoView({ block: "center", behavior: "instant" });
-  openDialog(
-    '<span class="eyebrow">PATCH’S FIELD GUIDE · ' +
-      (tourStep + 1) +
-      " / " +
-      tour.length +
-      '</span><div class="tour-character">' +
-      renderPortrait("PATCH") +
-      '</div><h2 id="dialog-title">' +
-      title +
-      '</h2><p tabindex="0">' +
-      copy +
-      '</p><div class="tour-controls">' +
-      button("Skip guide", "tour-end", "", "text-button") +
-      button(
-        tourStep === tour.length - 1 ? "Let’s go →" : "Next →",
-        "tour-next",
-        'data-testid="tour-next"',
-        "primary",
-      ) +
-      "</div>",
-    "tour",
-  );
+  closeDialog();
+  if (!active) {
+    openMission(profile.currentMission || missions[0].id);
+    return;
+  }
+  gamePanel = null;
+  chatter = null;
+  if (active.id === "c01-01" && !session.completed) play.tutorialStage = 0;
+  else
+    chatter = {
+      speaker: "PATCH",
+      text: "Walk with the arrows or tap the ground. Tap something interesting to try it. Your backpack has the excellent hats; my pocket has the emergency explanations.",
+    };
+  persistPlay();
+  render();
 }
 function showReflection() {
   quizFeedback = null;
@@ -1391,13 +1413,21 @@ function renderReflection(message = "") {
   if (quizIndex < active.questions.length) {
     const question = active.questions[quizIndex];
     openDialog(
-      '<span class="eyebrow">NOVA’S CHECK-IN · ' +
+      '<div class="radio-conversation">' +
+        renderPortrait("PATCH", "curious") +
+        '<span class="eyebrow">PATCH HAS A THEORY · ' +
         (quizIndex + 1) +
         " / " +
         active.questions.length +
         '</span><h2 id="dialog-title">' +
-        esc(question.question) +
-        '</h2><p>Choose the conclusion you can support.</p><div class="knowledge-options">' +
+        esc(
+          active.id === "c01-01"
+            ? quizIndex === 0
+              ? "I closed the map app. Please tell me I didn’t accidentally eat our route. What happened?"
+              : "That public mountain website looks broken too. Can I use our training badge to poke it?"
+            : question.question,
+        ) +
+        '</h2><p>Talk it through with your field buddy.</p><div class="knowledge-options">' +
         question.options
           .map((option, i) =>
             button(
@@ -1422,8 +1452,8 @@ function renderReflection(message = "") {
         (quizFeedback?.correct
           ? button(
               quizIndex === active.questions.length - 1
-                ? "Leave a field note →"
-                : "Next question →",
+                ? "Ready for the trail →"
+                : "And one more thing… →",
               "question-next",
               'data-testid="question-next"',
               "primary",
@@ -1433,15 +1463,18 @@ function renderReflection(message = "") {
     );
   } else {
     openDialog(
-      '<span class="eyebrow">MAKE IT STICK</span><h2 id="dialog-title">Tell your future self.</h2><p>' +
-        esc(active.debrief) +
-        '</p><label class="reflection-label">What did you notice, and why did it matter?<textarea id="reflection" rows="4" placeholder="A note in your own words. Optional.">' +
+      '<span class="eyebrow">THE TRAIL IS OPEN</span>' +
+        renderPortrait("PATCH", "celebrate") +
+        '<h2 id="dialog-title">Right. Boots on. Let’s go.</h2><p>' +
+        esc(
+          getPlayScene(active, session).win ||
+            "A little more of the valley is working. Patch is already pretending this was the plan.",
+        ) +
+        '</p><details><summary>Leave yourself a pocket note (optional)</summary><textarea id="reflection" rows="2" placeholder="Something you want to remember.">' +
         esc(session.reflection || "") +
-        '</textarea></label><div class="reflection-application"><strong>Outside the valley</strong><p>' +
-        esc(active.briefing.when) +
-        "</p></div>" +
+        "</textarea></details>" +
         button(
-          "Complete this encounter →",
+          "Light the beacon →",
           "complete",
           'data-testid="complete-encounter"',
           "primary",
@@ -1465,65 +1498,53 @@ function finish() {
     const next = missions[Math.min(completeIds().length, missions.length - 1)];
     profile.currentMission = next.id;
   }
+  syncPlayRewards(play, profile);
   persist();
   sound();
+  gamePanel = null;
   render();
   if (active.ending?.length && !reviewing)
     showStory(active.ending, "ending", () => showCompletion(record));
   else showCompletion(record);
 }
 function showCompletion(record) {
-  const independent = record.independent,
-    final = completeIds().length === 104 && !reviewing;
+  const final = completeIds().length === 104 && !reviewing;
   openDialog(
-    '<span class="eyebrow">' +
-      (reviewing
-        ? "RETURN TRIP COMPLETE"
-        : final
-          ? "THE VALLEY ANSWERS"
-          : "A LITTLE MORE OF THE VALLEY, RESTORED") +
-      '</span><div class="completion-character">' +
-      renderPortrait(final ? "NOVA" : "PATCH", "celebrate") +
-      '</div><h2 id="dialog-title">' +
-      (final ? "The last signal reaches home." : esc(active.title)) +
-      '</h2><p class="completion-story">' +
-      esc(active.debrief) +
-      '</p><div class="completion-stats"><div><strong>' +
-      completeIds().length +
-      " / 104</strong><span>story encounters</span></div><div><strong>" +
-      active.questions.length +
-      " / " +
-      active.questions.length +
-      "</strong><span>knowledge checks</span></div><div><strong>" +
-      (independent
-        ? "Independent"
-        : active.phase === "discover"
-          ? "Introduced"
-          : "Assisted") +
-      "</strong><span>this practical attempt</span></div></div><p>" +
-      esc(active.callback || "The valley remembers the care you took.") +
-      "</p>" +
+    '<div class="play-celebration"><span class="eyebrow">' +
       (final
-        ? '<div class="office-invitation"><span class="eyebrow">INCOMING / REGIONAL SECURITY OPERATIONS</span><p>“Your field report reached us. We have a bigger world of problems to show you.”</p><strong>The Office · Your next story is in development.</strong></div>'
-        : "") +
-      '<div class="completion-actions">' +
+        ? "THE VALLEY IS TALKING AGAIN"
+        : active.phase === "boss"
+          ? "BOSS CLEARED · NEW SOUVENIR"
+          : "BEACON LIT") +
+      "</span>" +
+      renderPortrait(final ? "NOVA" : "PATCH", "celebrate") +
+      '<h2 id="dialog-title">' +
+      esc(
+        final
+          ? "You brought the signal home."
+          : getPlayScene(active, session).title || active.title,
+      ) +
+      "</h2><p>" +
+      esc(getPlayScene(active, session).win || active.callback) +
+      '</p><div class="loot-reward"><span>✦</span><strong>+' +
+      (reviewing ? 0 : active.phase === "boss" ? 40 : 8) +
+      " acorns</strong><small>" +
+      (reviewing
+        ? "Return trip · your story rewards stay separate"
+        : "In your backpack. Spend them on spectacularly unnecessary gear.") +
+      '</small></div><div class="completion-actions">' +
       button(
-        reviewing
-          ? "Back to the chapter"
-          : final
-            ? "Return to the valley"
-            : "Follow the next clue →",
-        reviewing ? "chapter" : final ? "home" : "next",
+        final
+          ? "Back to the valley"
+          : reviewing
+            ? "Back to this chapter"
+            : "Onwards, ranger →",
+        final ? "home" : reviewing ? "chapter" : "next",
         'data-testid="next-encounter"',
         "primary",
       ) +
-      button(
-        "Try a return trip ↻",
-        "review",
-        'data-mission="' + active.id + '"',
-        "secondary",
-      ) +
-      "</div>",
+      button("Look in my backpack", "pack-after-win", "", "secondary") +
+      "</div></div>",
     "completion",
   );
 }
@@ -1653,9 +1674,9 @@ function showSettings() {
   openDialog(
     '<span class="eyebrow">MAKE YOURSELF AT HOME</span><h2 id="dialog-title">Your valley. Your pace.</h2><div class="settings-fields"><label><input id="setting-motion" type="checkbox" ' +
       (profile.settings.motion ? "checked" : "") +
-      '> Animated world<small>Your device’s reduced-motion preference takes priority.</small></label><label><input id="setting-sound" type="checkbox" ' +
+      '> World animation<small>Your device’s reduced-motion preference takes priority.</small></label><label><input id="setting-sound" type="checkbox" ' +
       (profile.settings.sound ? "checked" : "") +
-      '> Quiet discovery sounds<small>Short, gentle tones. Off until you choose them.</small></label><label><input id="setting-large" type="checkbox" ' +
+      '> Game sounds<small>Short, gentle tones. Off until you choose them.</small></label><label><input id="setting-large" type="checkbox" ' +
       (profile.settings.textSize === "large" ? "checked" : "") +
       '> Larger reading text<small>Make instructions, evidence, and dialogue easier to read.</small></label><label><input id="setting-timer" type="checkbox" ' +
       (profile.settings.timer ? "checked" : "") +
@@ -1681,9 +1702,20 @@ function showSettings() {
 function exportSave() {
   try {
     persist();
-    const blob = new Blob([storage.export(profile)], {
-        type: "application/json",
-      }),
+    const journey = JSON.parse(storage.export(profile));
+    const blob = new Blob(
+        [
+          JSON.stringify({
+            format: "terminal-trails-adventure",
+            version: 1,
+            journey,
+            play: validatePlayState(play, profile),
+          }),
+        ],
+        {
+          type: "application/json",
+        },
+      ),
       url = URL.createObjectURL(blob),
       link = document.createElement("a");
     link.href = url;
@@ -1697,9 +1729,25 @@ function exportSave() {
 }
 async function importFile(file) {
   if (!file) return;
-  if (file.size > MAX_SAVE_BYTES) return toast("This backup is too large.");
+  if (file.size > MAX_SAVE_BYTES + MAX_PLAY_BYTES + 1024)
+    return toast("This backup is too large.");
   try {
-    const candidate = storage.import(await file.text());
+    const parsed = JSON.parse(await file.text());
+    const envelope = parsed?.format === "terminal-trails-adventure";
+    if (
+      envelope &&
+      (parsed.version !== 1 ||
+        Object.keys(parsed).some(
+          (key) => !["format", "version", "journey", "play"].includes(key),
+        ))
+    )
+      throw new Error("This adventure backup has an unsupported format.");
+    const candidate = storage.import(
+      JSON.stringify(envelope ? parsed.journey : parsed),
+    );
+    const candidatePlay = envelope
+      ? validatePlayState(parsed.play, candidate)
+      : createPlayState(candidate);
     openDialog(
       '<span class="eyebrow">CHECK YOUR BACKUP</span><h2 id="dialog-title">Bring this journey back?</h2><p>' +
         candidate.completed.length +
@@ -1715,6 +1763,7 @@ async function importFile(file) {
       "import",
     );
     importFile.pending = candidate;
+    importFile.pendingPlay = candidatePlay;
   } catch (error) {
     toast(error.message);
   }
@@ -1729,6 +1778,7 @@ function handleActivity(result) {
       : "Look at the evidence and try one change.");
   if (typeof lastResponse !== "string") lastResponse = lastResponse.text || "";
   if (result.completedStep !== undefined) {
+    syncTutorial();
     sound();
     activeTool = stepNow()?.tool || activeTool;
     announce(
@@ -1737,10 +1787,65 @@ function handleActivity(result) {
         (stepNow()?.title || "Every clue is checked."),
     );
   } else announce(lastResponse);
+  if (result.completedStep === undefined && !result.ok) {
+    chatter = {
+      speaker: "PATCH",
+      text:
+        (getPlayScene(active, session).wrong?.[
+          Math.floor(
+            Math.random() * (getPlayScene(active, session).wrong?.length || 1),
+          )
+        ] ||
+          "Good experiment. The machine disagrees. Let’s try a different piece.") +
+        " " +
+        lastResponse,
+    };
+  }
   persist();
   render();
   if (result.completedStep !== undefined) showStepBeat(result.completedStep);
 }
+document.addEventListener("click", (event) => {
+  const control = event.target.closest("[data-game-action]");
+  if (!control || control.disabled || busy) return;
+  const action = control.dataset.gameAction;
+  if (action === "close-panel") {
+    gamePanel = null;
+    render();
+    $(".pw-scene")?.focus({ preventScroll: true });
+  }
+  if (action === "pack") {
+    gamePanel = "pack";
+    render();
+  }
+  if (action === "equip") {
+    const result = equipPlayItem(play, control.dataset.item);
+    chatter = {
+      speaker: "PATCH",
+      text:
+        result.message || "That is a spectacularly unnecessary hat. I approve.",
+    };
+    syncTutorial();
+    persistPlay();
+    render();
+  }
+  if (action === "gadget") {
+    gamePanel = "tools";
+    activeTool = stepNow()?.tool || "terminal";
+    render();
+  }
+  if (action === "nova") worldInteract(session.completed ? "exit" : "nova");
+  if (action === "skip-guide") {
+    play.tutorialStage=6;chatter={speaker:'PATCH',text:'Freestyle it is. Tap anything interesting; I will be right here if the hat starts receiving weather reports.'};persistPlay();render();
+  }
+  if (action === "hint" && stepNow()) {
+    const hint = requestHint(active, session, readyStep());
+    lastResponse = hint.text;
+    chatter = { speaker: "PATCH", text: hint.text };
+    persist();
+    render();
+  }
+});
 document.addEventListener("click", async (event) => {
   const control = event.target.closest("button");
   if (!control || control.disabled) return;
@@ -1765,6 +1870,7 @@ document.addEventListener("click", async (event) => {
   const action = control.dataset.action;
   if (busy && action !== "close-dialog") return;
   if (action === "home") {
+    gamePanel = null;
     if (active) persist();
     closeDialog();
     view = "home";
@@ -1791,6 +1897,17 @@ document.addEventListener("click", async (event) => {
       missions[Math.min(completeIds().length, missions.length - 1)].id,
     );
   }
+  if (action === "game-banter") {
+    const scene=getPlayScene(active,session);
+    if(introIndex<(scene.intro?.length||0))chatter=scene.intro[introIndex++];
+    else chatter={speaker:'PATCH',text:scene.banter[Math.floor(Math.random()*scene.banter.length)]};
+    render();
+  }
+  if (action === "pack-after-win") {
+    closeDialog();
+    gamePanel = "pack";
+    render();
+  }
   if (action === "journal") showJournal();
   if (action === "settings") showSettings();
   if (action === "close-dialog") dismissDialog();
@@ -1801,10 +1918,7 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "story-skip") endStory();
   if (action === "how-to") showTour();
-  if (action === "tour-next") {
-    if (++tourStep >= tour.length) endTour();
-    else renderTour();
-  }
+  if (action === "tour-next") showTour();
   if (action === "tour-end") endTour();
   if (action === "tool") {
     activeTool = control.dataset.tool;
@@ -1879,8 +1993,13 @@ document.addEventListener("click", async (event) => {
   if (action === "export") exportSave();
   if (action === "import") $("#import-file").click();
   if (action === "confirm-import") {
+    worldCleanup?.();
+    worldCleanup = null;
     profile = importFile.pending;
+    play = importFile.pendingPlay;
+    playRecoveryRequired = false;
     storage.write(profile);
+    persistPlay();
     active = null;
     session = null;
     reviewing = false;
@@ -1897,7 +2016,12 @@ document.addEventListener("click", async (event) => {
       "reset",
     );
   if (action === "confirm-reset") {
+    worldCleanup?.();
+    worldCleanup = null;
     profile = storage.reset();
+    play = createPlayState(profile);
+    playRecoveryRequired = false;
+    persistPlay();
     active = null;
     session = null;
     view = "home";
@@ -1923,6 +2047,30 @@ document.addEventListener("submit", (event) => {
   }
 });
 document.addEventListener("keydown", (event) => {
+  if (gamePanel && !dialog.open) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      gamePanel = null;
+      render();
+      $(".pw-scene")?.focus({ preventScroll: true });
+      return;
+    }
+    if (event.key === "Tab") {
+      const controls = $$(
+        'button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),[tabindex="0"]',
+        $("#game-panel"),
+      ).filter((node) => node.getClientRects().length);
+      const first = controls[0],
+        last = controls.at(-1);
+      if (
+        (event.shiftKey && document.activeElement === first) ||
+        (!event.shiftKey && document.activeElement === last)
+      ) {
+        event.preventDefault();
+        (event.shiftKey ? last : first)?.focus();
+      }
+    }
+  }
   if (event.target.id === "terminal-input") {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
@@ -2046,3 +2194,8 @@ function formatClock(value) {
 applySettings();
 render();
 if (storage.warning) toast(storage.warning);
+
+if (restoredPlay.error)
+  toast(
+    "Your older backpack is unreadable. Your learning progress is safe; this tab has a temporary backpack. Export it or explicitly start fresh to replace the damaged copy.",
+  );

@@ -8,6 +8,10 @@ A little adventure. A lot of real skills.
 
 The workbench includes a terminal, file explorer, network maps, an inbox/browser, evidence boards, timelines, field reports, a script workshop, and a fictional Windows workstation. Patch offers four strengths of help; the searchable journal keeps explanations and your actual fieldwork. Story scenes are skippable, larger text and reduced motion are supported, and mobile controls retain the same practical requirements.
 
+The adventure now starts in a controllable 2D scene. Walk with WASD/arrows or tap the ground, investigate physical props, collect gear, and equip hats and reward trails from your backpack. Patch's opening mishap becomes an action-based tutorial: move, meet him, open the crate, wear the antenna, rebuild the scattered computer and speak with Nova. The same playable world and gadget interactions continue across all 104 encounters. Equipment assembly, clue envelopes and route wiring replace worksheet dropdowns; tools open when needed, and verified actions visibly change the scene. The design direction is in [The playable valley](docs/PLAY_FIRST_DESIGN.md).
+
+Old Living Valley progress remains valid. New adventure backups also carry your backpack, cosmetics and exploration rewards; old journey-only JSON backups still import. The original root adventure keeps its separate saves. Functionality is tested; the player's enjoyment still needs an honest playthrough.
+
 The [full foundation map](docs/LIVING_VALLEY_FOUNDATION.md) groups every encounter, prerequisite and reinforcement. Regenerate it with `npm run map:valley` after changing the authored curriculum.
 
 Living Valley has its own browser saves and export/import backups. The original 24-mission expedition remains at the repository root with its saves intact. Office and Night Shift are still in development. See [the Living Valley design](docs/LIVING_VALLEY_DESIGN.md), [implementation contract](docs/LIVING_VALLEY_CONTRACT.md), [completed original playtest](docs/LIVING_VALLEY_PLAYTEST.md), and [review-to-fix audit](docs/LIVING_VALLEY_REVIEW_AUDIT.md).
@@ -18,6 +22,7 @@ After starting the server, open `/living-valley/` for the new adventure. Its che
 npm run check:valley
 npm run test:valley
 npm run test:valley:browser
+npm run test:valley:play
 ```
 
 The following describes the preserved original expedition.

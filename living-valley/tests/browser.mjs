@@ -28,6 +28,9 @@ const ui = id => page.getByTestId(id);
 const action = (name, extra = '') => page.locator(`[data-action="${name}"]${extra}`).filter({visible: true}).first();
 const objective = index => ui(`objective-${index}`);
 const isDone = async index => await objective(index).getAttribute('data-complete') === 'true';
+async function closeGamePanel() {
+  if (await ui('close-game-panel').isVisible()) await ui('close-game-panel').click();
+}
 
 async function noOverflow(label) {
   const size = await page.evaluate(() => ({viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth}));
@@ -65,7 +68,40 @@ async function storiesAndGuide() {
   }
   assert.fail('Story and guide frames must eventually return control to the player.');
 }
+async function openingAdventure() {
+  assert.equal(await page.locator('#game-world').count(), 1, 'The opening tutorial takes place in the playable world.');
+  assert.equal(await ui('tour-next').count(), 0, 'The old five-page explanatory tour no longer interrupts the opening.');
+  await page.locator('#game-world .pw-scene').focus();
+  await page.keyboard.down('d');
+  try {
+    await page.waitForFunction(() => {
+      const state = JSON.parse(localStorage.getItem('terminal-trails-play-v1') || 'null');
+      return state?.tutorialStage >= 1;
+    }, null, {timeout: 5000});
+  } finally {await page.keyboard.up('d');}
+  for (const [object, stage] of [['patch', 2], ['cache', 3]]) {
+    await page.locator(`[data-world-object="${object}"]`).click();
+    await page.waitForFunction(target => JSON.parse(localStorage.getItem('terminal-trails-play-v1') || 'null')?.tutorialStage >= target, stage, {timeout: 10000});
+  }
+  await ui('pack').click();
+  await ui('equip-antenna-cap').click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('terminal-trails-play-v1') || 'null')?.tutorialStage >= 4);
+  await ui('close-game-panel').click();
+  await recoverOpeningParts();
+}
+async function recoverOpeningParts() {
+  await closeGamePanel();
+  for (const id of ['screen', 'linux', 'viewer', 'route']) {
+    const object = page.locator(`[data-world-object="artifact:${id}"]`);
+    if (!await object.count()) continue;
+    await object.click();
+    await page.waitForFunction(item => !document.querySelector(`[data-world-object="artifact:${item}"]`), id, {timeout: 10000});
+    assert.equal(await isDone(0), false, 'Recovering a component does not complete its assembly puzzle.');
+  }
+}
 async function selectTool(tool) {
+  const gadget = ui('open-gadget');
+  if (await gadget.isVisible() && !await page.locator('#game-panel .tool-tabs').count()) await gadget.click();
   const button = page.locator(`.tool-tabs [data-tool=${JSON.stringify(tool)}]`);
   if (await button.getAttribute('aria-pressed') !== 'true') await button.click();
 }
@@ -88,6 +124,7 @@ async function enterCommand(raw) {
 }
 async function exportJourney(label) {
   if (await page.locator('#dialog[open]').count()) await action('close-dialog').click();
+  await closeGamePanel();
   await ui('settings').click();
   const downloadPromise = page.waitForEvent('download');
   await ui('export-save').click();
@@ -95,7 +132,8 @@ async function exportJourney(label) {
   const path = new URL(`${label}.json`, artifacts).pathname;
   await download.saveAs(path);
   await action('close-dialog').click();
-  return {path, profile: JSON.parse(await readFile(path, 'utf8'))};
+  const data = JSON.parse(await readFile(path, 'utf8'));
+  return {path, data, profile: data.journey || data};
 }
 function canonical(profile) {return {completed: profile.completed, sessions: profile.sessions, records: profile.records};}
 
@@ -103,7 +141,7 @@ async function inspectRequired(step, index) {
   const ids = step.solution?.inspect || step.activity.requiredInspect || [];
   for (const id of ids) {
     if (await isDone(index)) break;
-    const button = page.locator(`[data-action="inspect"][data-item=${JSON.stringify(id)}]`).filter({visible: true});
+    const button = ui(`inspect-${id}`).filter({visible: true});
     assert.ok(await button.count(), `${step.id}: required evidence ${id} has a usable public inspection control`);
     await button.first().click();
     await storiesAndGuide();
@@ -111,12 +149,13 @@ async function inspectRequired(step, index) {
 }
 async function solveActivity(mission, step, index) {
   const activity = step.activity, solution = step.solution || {};
+  if (mission.id === 'c01-01' && index === 0 && activity.kind === 'classify') await recoverOpeningParts();
   await selectTool(step.tool);
   if (activity.kind === 'inspect' && !negativeKinds.has('inspect')) {
     const relevant = activity.requiredInspect || solution.inspect || [];
     const irrelevant = activity.items.find(item => !relevant.includes(item.id));
     if (irrelevant) {
-      await page.locator(`[data-action="inspect"][data-item=${JSON.stringify(irrelevant.id)}]`).click();
+      await ui(`inspect-${irrelevant.id}`).click();
       assert.equal(await isDone(index), false, 'Opening irrelevant evidence cannot finish the observation');
       negativeKinds.add('inspect');
     }
@@ -125,9 +164,9 @@ async function solveActivity(mission, step, index) {
   if (await isDone(index)) return;
   if ((activity.kind === 'choose' || activity.kind === 'compare') && !negativeKinds.has(activity.kind)) {
     const wrong = activity.choices.find(choice => !choice.correct);
-    await page.locator(`[data-action="activity-choice"][data-choice=${JSON.stringify(wrong.id)}]`).click();
+    await ui(`choice-${wrong.id}`).click();
     assert.equal(await isDone(index), false, 'A plausible but unsupported choice earns no evidence');
-    assert.ok((await page.locator('.activity-response').innerText()).length > 10, 'Wrong-choice feedback explains the evidence gap');
+    assert.ok((await page.locator('#game-panel .gadget-reaction').innerText()).length > 10, 'Wrong-choice feedback is readable inside the open gadget');
     negativeKinds.add(activity.kind);
   } else if (['classify', 'sequence', 'connect', 'report', 'repair'].includes(activity.kind) && !negativeKinds.has(activity.kind)) {
     if (activity.kind === 'repair') await page.locator('[data-repair-text]').fill('');
@@ -136,12 +175,15 @@ async function solveActivity(mission, step, index) {
     negativeKinds.add(activity.kind);
   }
   if (activity.kind === 'choose' || activity.kind === 'compare') {
-    await page.locator(`[data-action="activity-choice"][data-choice=${JSON.stringify(solution.choice)}]`).click();
+    await ui(`choice-${solution.choice}`).click();
   } else if (activity.kind === 'classify') {
-    for (const [id, category] of Object.entries(solution.classifications)) await page.locator(`[data-category=${JSON.stringify(id)}]`).selectOption(category);
+    for (const [id, category] of Object.entries(solution.classifications)) {
+      await ui(`classify-item-${id}`).click();
+      await ui(`classify-target-${category}`).click();
+    }
     await ui('submit-activity').click();
   } else if (activity.kind === 'sequence' || activity.kind === 'connect') {
-    for (const id of solution.order) await page.locator(`[data-action="sequence-add"][data-item=${JSON.stringify(id)}]`).click();
+    for (const id of solution.order) await ui(`sequence-add-${id}`).click();
     await ui('submit-activity').click();
   } else if (activity.kind === 'report') {
     for (const [id, value] of Object.entries(solution.fields)) await page.locator(`[data-report-field=${JSON.stringify(id)}]`).fill(value);
@@ -153,11 +195,14 @@ async function solveActivity(mission, step, index) {
   await storiesAndGuide();
 }
 async function debrief(mission, note = '') {
+  await closeGamePanel();
   assert.ok(await ui('finish-encounter').isEnabled(), `${mission.id}: every practical clue is required`);
   await ui('finish-encounter').click();
   for (const [index, question] of mission.questions.entries()) {
     assert.equal(await ui('complete-encounter').isVisible(), false, 'Unanswered knowledge checks cannot complete the encounter');
-    assert.match(await page.locator('#dialog-title').innerText(), new RegExp(question.question.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    if (mission.id !== 'c01-01') assert.match(await page.locator('#dialog-title').innerText(), new RegExp(question.question.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    else assert.ok((await page.locator('#dialog-title').innerText()).length > 15, 'The first knowledge check is voiced as Patch dialogue.');
+    for (const [answerIndex, option] of question.options.entries()) assert.equal(await ui(`answer-${answerIndex}`).innerText(), option, 'Conversation answers still match the real knowledge gate.');
     await ui(`answer-${(question.answer + 1) % question.options.length}`).click();
     assert.equal(await ui('question-next').isVisible(), false, 'An incorrect answer keeps the knowledge gate closed');
     await ui(`answer-${question.answer}`).click();
@@ -165,7 +210,11 @@ async function debrief(mission, note = '') {
     assert.equal(await ui('complete-encounter').isVisible(), false, 'Acknowledging the explanation is explicit');
     await ui('question-next').click();
   }
-  if (note) await page.locator('#reflection').fill(note);
+  if (note) {
+    const noteDetails = page.locator('#dialog details').filter({has: page.locator('#reflection')});
+    if (await noteDetails.count() && !await noteDetails.evaluate(node => node.open)) await noteDetails.locator('summary').click();
+    await page.locator('#reflection').fill(note);
+  }
   await ui('complete-encounter').click();
   await storiesAndGuide();
   assert.equal(await page.locator('#dialog').getAttribute('data-kind'), 'completion');
@@ -203,8 +252,9 @@ async function solveMission(mission, {number, review = false, partialReload = fa
     for (let future = index + 1; future < mission.steps.length; future++) assert.equal(await isDone(future), false, 'An action cannot award a future clue');
     await noOverflow(`${mission.id}/${step.id}`);
     if (mission.id === 'c01-01' && index === 0 && !review) {
+      await closeGamePanel();
       await ui('ask-patch').click();
-      assert.ok((await page.locator('#patch-response').innerText()).length > 10, 'Patch offers a contextual nudge');
+      assert.ok((await page.locator('.play-speech-copy').innerText()).length > 10, 'Patch offers a contextual nudge');
       const partial = await exportJourney('canonical-partial');
       assert.deepEqual(partial.profile.sessions[mission.id].done, mission.steps.map((_, i) => i === 0));
       await page.reload({waitUntil: 'networkidle'});
@@ -227,7 +277,7 @@ async function solveMission(mission, {number, review = false, partialReload = fa
   }
   await debrief(mission, mission.id === 'c01-01' ? reflection : `QA route: ${mission.briefing.plain}`);
   if (!review) {
-    assert.match(await page.locator('.completion-stats').innerText(), new RegExp(`${number}\\s*/\\s*104`));
+    assert.match(await page.locator('.progress-chip').innerText(), new RegExp(`${number}\\s*/\\s*104`));
     if (mission.phase === 'boss') bossCount++;
     completed.push(mission.id);
     console.log(`✓ ${String(number).padStart(3, '0')}/104 ${mission.id} — ${mission.title}`);
@@ -257,14 +307,8 @@ try {
   await screenshot('first-story-landscape', 844, 390);
   await page.setViewportSize({width: 1440, height: 1000});
   while (await ui('story-next').isVisible()) {sceneFrames++;cinematicModes.intro = (cinematicModes.intro || 0) + 1;await ui('story-next').click();}
-  const guideTitles = new Set();
-  for (let index = 0; index < 5; index++) {
-    assert.equal(await ui('tour-next').isVisible(), true, 'A new journey receives all five field-guide explanations');
-    guideTitles.add(await page.locator('#dialog-title').innerText());
-    if (index === 0) for (const [width, height] of [[320, 900], [390, 900], [844, 390]]) await screenshot('field-guide', width, height);
-    await ui('tour-next').click();
-  }
-  assert.equal(guideTitles.size, 5);
+  await openingAdventure();
+  for (const [width, height] of [[320, 900], [390, 900], [844, 390]]) await screenshot('playable-field-guide', width, height);
   await page.setViewportSize({width: 1440, height: 1000});
 
   // Settings are real behavior: reading size, reduced motion, and a paused clock.
