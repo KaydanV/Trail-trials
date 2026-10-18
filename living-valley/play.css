@@ -695,7 +695,7 @@ dialog[data-kind="reflection"] .dialog-close {
     visibility: hidden;
   }
   body[data-view="mission"] #toast {
-    bottom: calc(136px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(148px + env(safe-area-inset-bottom, 0px));
   }
   .play-panel {
     top: max(9px, env(safe-area-inset-top, 0px));
