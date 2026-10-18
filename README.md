@@ -4,6 +4,8 @@ A little adventure. A lot of real skills.
 
 **The new adventure is [The Living Valley](living-valley/).** It follows the expanded foundation blueprint: 92 learning missions grouped into 12 chapters, each ending in a connected boss investigation. Discovery teaches the tools, practice removes the supplied route, and proof encounters combine earlier skills. Verified findings drive character reactions and changes in the illustrated valley.
 
+[Play The Living Valley](https://kaydanv.github.io/Trail-trials/living-valley/) · [Play the original expedition](https://kaydanv.github.io/Trail-trials/)
+
 The workbench includes a terminal, file explorer, network maps, an inbox/browser, evidence boards, timelines, field reports, a script workshop, and a fictional Windows workstation. Patch offers four strengths of help; the searchable journal keeps explanations and your actual fieldwork. Story scenes are skippable, larger text and reduced motion are supported, and mobile controls retain the same practical requirements.
 
 The [full foundation map](docs/LIVING_VALLEY_FOUNDATION.md) groups every encounter, prerequisite and reinforcement. Regenerate it with `npm run map:valley` after changing the authored curriculum.
