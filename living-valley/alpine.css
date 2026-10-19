@@ -216,3 +216,33 @@ body[data-motion="off"] [data-art-direction="alpine"] .alpine-ranger { animation
 }
 [data-art-direction="alpine"] .pack-character-preview > span > svg { position:absolute; top:-4%; left:44%; width:43%; visibility:hidden; }
 [data-art-direction="alpine"] .pack-character-preview > span > svg .pw-hat:not([data-hat-art="starter-cap"]) { visibility:visible; }
+/* The visual language follows the journey; it never falls back to the legacy set. */
+[data-art-direction="alpine"] .pw-world { --scene-art:url('../assets/scenes/welcome-alpine.webp'); }
+[data-art-direction="alpine"] .pw-world:is([data-play-scene="desk"],[data-play-scene="maps"]) { --scene-art:url('../assets/scenes/alpine-workshop.webp'); }
+[data-art-direction="alpine"] .pw-world:is([data-play-scene="owl"],[data-play-scene="burrow"],[data-play-scene="post"]) { --scene-art:url('../assets/scenes/alpine-archive.webp'); }
+[data-art-direction="alpine"] .pw-world:is([data-play-scene="lantern"],[data-play-scene="keeper"],[data-play-scene="bridge"],[data-play-scene="lookout"],[data-play-scene="tower"],[data-play-scene="summit"]) { --scene-art:url('../assets/scenes/alpine-observatory.webp'); }
+[data-art-direction="alpine"] .pw-painted-backdrop { background-image:var(--scene-art)!important; }
+[data-art-direction="alpine"] .pw-ranger { width:clamp(55px,6.5%,96px); }
+[data-art-direction="alpine"] .pw-nova { width:clamp(50px,5.8%,85px); }
+[data-art-direction="alpine"] .pw-patch { width:clamp(43px,5.4%,75px); }
+[data-art-direction="alpine"] .alpine-character {
+  filter:drop-shadow(0 5px 5px #020b12b0) drop-shadow(0 0 3px #addbd159) drop-shadow(0 0 10px #96cfc526);
+}
+[data-art-direction="alpine"] .pw-clue-object { width:clamp(50px,6%,82px); }
+[data-art-direction="alpine"] .pw-clue-object .alpine-prop {
+  filter:drop-shadow(0 5px 4px #020b1290) drop-shadow(0 0 4px #ffe0a075) drop-shadow(0 0 15px #e9c27a38);
+}
+[data-art-direction="alpine"] .pw-clue-object:is(:hover,:focus-visible) .alpine-prop {
+  filter:drop-shadow(0 5px 4px #020b1290) drop-shadow(0 0 5px #ffe0a0b0) drop-shadow(0 0 20px #e9c27a66);
+}
+[data-art-direction="alpine"] .pw-boss-obstruction > svg { visibility:hidden; }
+[data-art-direction="alpine"] .pw-boss-obstruction::before {
+  content:''; position:absolute; inset:8% 20% 12%;
+  background:url('../assets/scenes/alpine-equipment.webp') 62.5% 50% / 571.579% 100% no-repeat;
+  filter:drop-shadow(0 0 20px #cc764a99) sepia(.35); pointer-events:none;
+}
+[data-art-direction="alpine"] .pw-boss-obstruction[data-defeated="true"]::before { filter:drop-shadow(0 0 25px #9cddcb88); }
+[data-art-direction="alpine"] .pw-boss-obstruction > span { background:#10212be8; border:1px solid #c3a87b66; color:#e5dac3; border-radius:4px; }
+@media (max-width:760px) and (orientation:portrait) {
+  [data-art-direction="alpine"] .pw-world[data-play-scene="welcome"] { --scene-art:url('../assets/scenes/welcome-alpine-portrait.webp'); }
+}
