@@ -32,6 +32,7 @@ jobs:
           npm run test:mobile
           npm run test:valley:browser
           npm run test:valley:play
+          npm run test:valley:immersive
       - uses: actions/upload-artifact@v4
         if: always()
         with:

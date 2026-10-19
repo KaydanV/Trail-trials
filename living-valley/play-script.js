@@ -4,6 +4,111 @@
  * someone to share them with. Nothing here awards an encounter or changes a save.
  */
 
+/**
+ * The controls rehearsal happens in the world before free play. Its completion
+ * belongs to its own guide state, never the curriculum's six legacy gates below.
+ * Each action is an observed interaction rather than an instruction to mark an
+ * objective complete. The console in this rehearsal is a harmless preview.
+ *
+ * `target` is a spotlight/focus hint. It must not hide the rest of the world or
+ * block the action it describes. Where a target lives in a closed panel, open
+ * that panel through the normal player action first. Replaying the guide must
+ * accept an already searched crate and an already owned hat without new rewards.
+ */
+export const controlsTutorial = [
+  {
+    id: 'welcome',
+    gate: 'continue',
+    speaker: 'PATCH',
+    title: 'Welcome! Mind the airborne equipment.',
+    text: 'I am Patch, your field buddy. My welcome machine has scattered our kit. Nova calls this a disaster. I call it an unusually practical introduction.',
+    returningText: 'Patch here, still not trusted with the welcome machine. Before we head out, let us try your walking controls, backpack and gadgets. Your existing adventure stays exactly where you left it.',
+    action: 'Show me the controls',
+    target: '.pw-scene',
+    tip: 'We will try walking, talking and using your kit together. No timer. No test. You can replay this guide whenever you like.',
+    success: 'Excellent. Try not to stand where the equipment lands.',
+  },
+  {
+    id: 'walk',
+    gate: 'move',
+    speaker: 'NOVA',
+    title: 'First, find your feet.',
+    text: 'That ranger is you. Walk a few steps along the trail. You can explore at your own pace; nothing runs away while you learn the controls.',
+    action: 'Walk a short distance.',
+    target: '.pw-scene',
+    keyboardTip: 'Hold W A S D or the arrow keys. You can also click a clear patch of ground.',
+    touchTip: 'Tap the ground to walk there, or drag and hold the walking stick in the direction you want to go.',
+    tip: 'Tap an interesting object and your ranger walks over to it. Walking never needs a terminal command.',
+    success: 'PATCH: Feet operational. My clipboard says this is a promising start.',
+  },
+  {
+    id: 'talk',
+    gate: 'meet-patch',
+    speaker: 'PATCH',
+    title: 'Meet Patch.',
+    text: 'Come say hello. Characters tell you what is happening and react to what you do. I also provide hints and opinions nobody ordered.',
+    action: 'Talk to Patch.',
+    target: '[data-world-object="patch"]',
+    keyboardTip: 'Walk close to Patch and press E or Space. You can also click him.',
+    touchTip: 'Tap Patch. Your ranger walks over and starts the conversation.',
+    tip: 'When you get stuck, use Patch’s hint button. Ask again for a clearer clue. There is no penalty for asking.',
+    success: 'PATCH: Hello! We are now officially acquainted. My biscuit references are available on request.',
+  },
+  {
+    id: 'collect',
+    gate: 'collect-cache',
+    speaker: 'PATCH',
+    title: 'Loot with a questionable antenna.',
+    text: 'Investigate that supply crate. Objects can hold gear, trail coins, a clue, or the thing the story needs you to repair. A crate you already searched stays empty.',
+    action: 'Open the supply crate.',
+    target: '[data-world-object="cache"]',
+    keyboardTip: 'Get close and press E or Space, or click the crate.',
+    touchTip: 'Tap the crate to walk over and search it.',
+    tip: 'Trail coins buy looks. Story clues solve problems. Looking in the same crate twice does not create infinite treasure; I checked.',
+    success: 'PATCH: Crate checked. A rigorous investigation by someone with excellent pockets.',
+  },
+  {
+    id: 'equip',
+    gate: 'equip-hat',
+    speaker: 'NOVA',
+    title: 'Make this ranger yours.',
+    text: 'Open your backpack and equip a hat you own. Try the antenna if you found it, or choose your ranger cap. You will see your choice on your ranger.',
+    action: 'Open Backpack and equip an owned hat.',
+    target: '[data-testid="pack"]',
+    keyboardTip: 'Tab to Backpack and press Enter. Choose Equip or reselect your worn hat, then close the pack with Escape.',
+    touchTip: 'Tap Backpack, then Equip or your already worn hat. Use × to return to the trail.',
+    tip: 'Outfits and trail effects change your look. Coins buy optional styles; a fancy hat does not solve the mystery for you. I have tried.',
+    success: 'PATCH: A strong look. I would trust you with a map. Possibly even the good biscuit tin.',
+  },
+  {
+    id: 'tools',
+    gate: 'practice-console',
+    speaker: 'NOVA',
+    title: 'Your gadgets make things happen.',
+    text: 'Open the practice gadget. Try help to see available commands, then pwd to ask where you are. Type a command and press Enter; read the reply underneath. This practice console changes no mission progress.',
+    action: 'Try help and pwd, then put the gadget away.',
+    target: '[data-testid="open-gadget"]',
+    keyboardTip: 'Enter runs your command. Use the up arrow to recall it. Escape closes the gadget.',
+    touchTip: 'Tap the command line, type, and use the run button. Tap × to put the gadget away.',
+    tip: 'A file gadget opens clues. A workbench fits parts. The terminal follows typed instructions. The story brings in each tool when you need it; you never have to guess an untaught command.',
+    success: 'PATCH: You asked. The machine answered. No incantations, smoke, or advanced sandwich mathematics required.',
+  },
+  {
+    id: 'ready',
+    gate: 'start-adventure',
+    speaker: 'NOVA',
+    title: 'Now, our first little rescue.',
+    returningTitle: 'Back to your adventure.',
+    text: 'The current goal stays on your screen. First, recover the four scattered kit pieces and use the workbench to put them together. Then talk to me so we can choose where to investigate the dark signs.',
+    returningText: 'Your current goal stays on your screen. Explore the scene, follow the clues and use the gadget the story calls for. When the task is done, check in with me, then take the trail onwards.',
+    action: 'Let’s rescue that kit',
+    returningAction: 'Let’s get back out there',
+    target: '[data-testid="current-objective"]',
+    tip: 'Use the dialogue arrow to open Patch’s hint button. Notebook keeps your learned commands and notes. Progress saves in this browser; the menu’s export and import controls move it between devices. Wrong tries stay fixable.',
+    success: 'PATCH: Ranger ready. Antenna questionable. Adventure definitely on.',
+  },
+];
+
 export const tutorialBeats = [
   { id: 'move', eventGate: 'move', speaker: 'PATCH', title: 'Well. That was the welcome.', text: 'Tiny problem. My snack launcher has launched the welcome kit. And possibly my dignity. Tap the ground to walk over here.', action: 'Walk towards Patch.' },
   { id: 'meet-patch', eventGate: 'meet-patch', speaker: 'PATCH', title: 'Hello, new best colleague!', text: 'I am Patch. That was a controlled experiment in things leaving a crate. Tap me when you want to talk to someone.', action: 'Talk to Patch.' },

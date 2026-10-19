@@ -61,6 +61,10 @@ async function storiesAndGuide() {
       speakers.add(copy.split('·')[0].trim());
       await dialogFits(`${mode} story frame`);
       await ui('story-next').click();
+    } else if (await ui('guide-skip').isVisible()) {
+      // The complete rehearsal is exercised separately in immersive-browser.
+      // This canonical route deliberately uses its public skip control.
+      await ui('guide-skip').click();
     } else if (await ui('tour-next').isVisible()) {
       await dialogFits('Field guide');
       await ui('tour-next').click();
@@ -71,18 +75,20 @@ async function storiesAndGuide() {
 async function openingAdventure() {
   assert.equal(await page.locator('#game-world').count(), 1, 'The opening tutorial takes place in the playable world.');
   assert.equal(await ui('tour-next').count(), 0, 'The old five-page explanatory tour no longer interrupts the opening.');
+  const origin = await page.locator('.play-avatar').evaluate(node => ({x: Number(node.dataset.x), y: Number(node.dataset.y)}));
   await page.locator('#game-world .pw-scene').focus();
   await page.keyboard.down('d');
   try {
-    await page.waitForFunction(() => {
-      const state = JSON.parse(localStorage.getItem('terminal-trails-play-v1') || 'null');
-      return state?.tutorialStage >= 1;
-    }, null, {timeout: 5000});
+    await page.waitForFunction(start => {
+      const node = document.querySelector('.play-avatar');
+      return Math.hypot(Number(node.dataset.x) - start.x, Number(node.dataset.y) - start.y) >= 5;
+    }, origin, {timeout: 5000});
   } finally {await page.keyboard.up('d');}
-  for (const [object, stage] of [['patch', 2], ['cache', 3]]) {
-    await page.locator(`[data-world-object="${object}"]`).click();
-    await page.waitForFunction(target => JSON.parse(localStorage.getItem('terminal-trails-play-v1') || 'null')?.tutorialStage >= target, stage, {timeout: 10000});
-  }
+  const priorSpeech = await page.locator('.play-speech-copy').innerText();
+  await page.locator('[data-world-object="patch"]').click();
+  await page.waitForFunction(before => document.querySelector('.play-speech-copy')?.textContent.trim() !== before.trim(), priorSpeech, {timeout: 10000});
+  await page.locator('[data-world-object="cache"]').click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('terminal-trails-play-v1') || 'null')?.collected.includes('c01-01:cache'), null, {timeout: 10000});
   await ui('pack').click();
   await ui('equip-antenna-cap').click();
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('terminal-trails-play-v1') || 'null')?.tutorialStage >= 4);
@@ -253,6 +259,7 @@ async function solveMission(mission, {number, review = false, partialReload = fa
     await noOverflow(`${mission.id}/${step.id}`);
     if (mission.id === 'c01-01' && index === 0 && !review) {
       await closeGamePanel();
+      if (!await ui('ask-patch').isVisible()) await page.locator('[data-game-action="speech-expand"]').click();
       await ui('ask-patch').click();
       assert.ok((await page.locator('.play-speech-copy').innerText()).length > 10, 'Patch offers a contextual nudge');
       const partial = await exportJourney('canonical-partial');
@@ -277,7 +284,9 @@ async function solveMission(mission, {number, review = false, partialReload = fa
   }
   await debrief(mission, mission.id === 'c01-01' ? reflection : `QA route: ${mission.briefing.plain}`);
   if (!review) {
-    assert.match(await page.locator('.progress-chip').innerText(), new RegExp(`${number}\\s*/\\s*104`));
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('terminal-trails-living-valley-v1')));
+    assert.equal(saved.completed.length, number, 'The visible completion persists exactly one newly earned encounter.');
+    assert.ok(saved.records[mission.id], 'The earned completion has a saved report.');
     if (mission.phase === 'boss') bossCount++;
     completed.push(mission.id);
     console.log(`✓ ${String(number).padStart(3, '0')}/104 ${mission.id} — ${mission.title}`);
@@ -307,6 +316,7 @@ try {
   await screenshot('first-story-landscape', 844, 390);
   await page.setViewportSize({width: 1440, height: 1000});
   while (await ui('story-next').isVisible()) {sceneFrames++;cinematicModes.intro = (cinematicModes.intro || 0) + 1;await ui('story-next').click();}
+  await storiesAndGuide();
   await openingAdventure();
   for (const [width, height] of [[320, 900], [390, 900], [844, 390]]) await screenshot('playable-field-guide', width, height);
   await page.setViewportSize({width: 1440, height: 1000});
@@ -371,7 +381,7 @@ try {
   assert.deepEqual(canonical(restored.profile), baseline);
   assert.deepEqual(restored.profile.practiceSessions, withPractice.profile.practiceSessions);
   await ui('start-journey').click();await storiesAndGuide();
-  assert.match(await page.locator('.progress-chip').innerText(), /104\s*\/\s*104/);
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('terminal-trails-living-valley-v1')).completed.length), 104);
   await screenshot('restored-on-phone', 390, 900);
   assert.deepEqual(errors, [], 'No uncaught browser errors across canonical, practice, or imported journeys');
   assert.deepEqual(resources, [], 'Every requested local application resource loaded');

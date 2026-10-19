@@ -10,11 +10,12 @@
     "test:browser": "node tests/browser.mjs",
     "test:mobile": "node tests/mobile.mjs",
     "check": "node --check src/app.js && node --check src/curriculum.js && node --check src/engine.js && node --check src/storage.js && node --check src/presentation.js && node --check src/tutorial.js && node --check src/tools.js && node --check src/coach.js && node --check src/practice.js && node --check src/world.js",
-    "check:valley": "node --check living-valley/app.js && node --check living-valley/curriculum.js && node --check living-valley/runtime.js && node --check living-valley/shell.js && node --check living-valley/review.js && node --check living-valley/world.js && node --check living-valley/data/chapters-01-04.js && node --check living-valley/data/chapters-05-08.js && node --check living-valley/data/chapters-09-12.js && node --check living-valley/data/foundation-details.js && node --check scripts/valley-map.mjs && node --check living-valley/play-world.js && node --check living-valley/play-tools.js && node --check living-valley/play-script.js && node --check living-valley/play-state.js",
+    "check:valley": "node --check living-valley/app.js && node --check living-valley/curriculum.js && node --check living-valley/runtime.js && node --check living-valley/shell.js && node --check living-valley/review.js && node --check living-valley/world.js && node --check living-valley/data/chapters-01-04.js && node --check living-valley/data/chapters-05-08.js && node --check living-valley/data/chapters-09-12.js && node --check living-valley/data/foundation-details.js && node --check scripts/valley-map.mjs && node --check living-valley/play-world.js && node --check living-valley/play-tools.js && node --check living-valley/play-script.js && node --check living-valley/play-state.js && node --check living-valley/play-guide.js && node --check living-valley/play-art.js && node --check living-valley/play-controller.js",
     "test:valley": "node --test living-valley/tests/*.test.js",
     "test:valley:browser": "node living-valley/tests/browser.mjs",
     "map:valley": "node scripts/valley-map.mjs",
-    "test:valley:play": "node living-valley/tests/play-browser.mjs"
+    "test:valley:play": "node living-valley/tests/play-browser.mjs",
+    "test:valley:immersive": "node living-valley/tests/immersive-browser.mjs"
   },
   "devDependencies": {
     "playwright": "1.58.2"

@@ -1,5 +1,8 @@
 /** A small, local adventure stage. Walking never awards lesson progress. */
-import { getPlayScene } from './play-script.js';
+import { getPlayScene } from './play-script.js?v=20261018-immersive';
+import { WALK_BOUNDS, walkDistance, isWalkable, walkablePoint, planWalk, moveOnTrail, integrateWalk } from './play-controller.js';
+import { renderRanger, renderGearIcon, renderNova, renderPatch } from './play-art.js';
+export { renderGearIcon };
 const e = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : lo));
 const places = {
@@ -34,43 +37,6 @@ function bossBody(chapter) {
     12: '<path fill="#596b78" stroke="#bfc9b1" stroke-width="5" d="m84 192 23-106h47l23 106z"/><path fill="#c8ba85" stroke="#e4cc95" stroke-width="4" d="m88 83 42-37 46 37-12 33-34 15-32-15z"/><path fill="#3e4c6b" d="m106 83 24-20 26 21-8 20-17 10-18-11z"/><path fill="#c39094" d="m132 60-17 26 15 4-11 32 31-41-16-1 13-18z"/><path fill="none" stroke="#b397a8" stroke-width="6" d="m62 52-17-15m156 14 18-17m-160 88-25 1m172 0 22 2"/>',
   };
   return bodies[chapter] || bodies[12];
-}
-
-function ranger(hat = 'cap') {
-  const key = String(hat).toLowerCase();
-  const headwear = /acorn/.test(key)
-    ? '<path fill="#b3773e" stroke="#67412e" stroke-width="2" d="M35 29q25-27 50 0v14H35z"/><path fill="#6e4c31" d="M31 29q29-22 58 0v7H31z"/><path stroke="#66412b" stroke-width="5" d="m60 20 5-10"/>'
-    : /antenna/.test(key)
-      ? '<path fill="#5dabb0" stroke="#244c50" stroke-width="2" d="M33 34q27-27 54 0v9H33z"/><path stroke="#d4b36a" stroke-width="4" d="M60 24V9"/><circle fill="#7ef2d0" cx="60" cy="7" r="5"/>'
-      : /crown/.test(key)
-        ? '<path fill="#e8bd61" stroke="#87612d" stroke-width="2" d="m33 37-4-21 17 10 14-19 14 19 17-10-4 21z"/>'
-        : /mushroom/.test(key)
-          ? '<path fill="#f0d8a2" d="M35 29h50v13H35z"/><path fill="#bf6452" stroke="#754b3b" stroke-width="2" d="M23 32q37-57 74 0z"/><g fill="#f4dfb5"><circle cx="45" cy="21" r="5"/><circle cx="66" cy="14" r="5"/><circle cx="80" cy="26" r="4"/></g>'
-          : /hardhat/.test(key)
-            ? '<path fill="#e2b959" stroke="#826b39" stroke-width="2" d="M31 35q0-31 29-31t29 31z"/><path fill="#efd084" d="M24 32h73v10H24zM56 6h9v24h-9z"/><path fill="#5e8072" d="M50 22h21v13H50z"/><circle fill="#d4f0bd" cx="60" cy="28" r="4"/>'
-            : /starry/.test(key)
-              ? '<path fill="#555b86" stroke="#353f63" stroke-width="2" d="m31 34 8-21h40l9 21z"/><path fill="#b2acc2" d="M24 34q37-10 73 1l-6 7H30z"/><path fill="#f0d78e" d="m60 12 3 7 8 1-6 5 1 8-6-4-7 4 2-8-6-5 8-1z"/>'
-              : /beanie/.test(key)
-          ? '<path fill="#d16e4f" d="M34 36q0-34 26-34t26 34z"/><path fill="#f0ad74" d="M31 29h58v13H31z"/><circle fill="#f0ad74" cx="60" cy="4" r="7"/>'
-          : '<path fill="#748d55" stroke="#304936" stroke-width="2" d="m31 34 8-21h40l9 21z"/><path fill="#b6be76" stroke="#304936" stroke-width="2" d="M24 34q37-10 73 1l-6 7H30z"/><path fill="#dfbd63" d="m56 17 5-3 5 3-2 10h-6z"/>';
-  return svg(`<ellipse fill="#071e23" opacity=".35" cx="60" cy="113" rx="27" ry="6"/><g class="pw-ranger-leg pw-leg-left"><path stroke="#243a39" stroke-width="12" stroke-linecap="round" d="m48 81-2 24"/><path fill="#695242" d="M38 103h16v10H35q-2-6 3-10"/></g><g class="pw-ranger-leg pw-leg-right"><path stroke="#243a39" stroke-width="12" stroke-linecap="round" d="m72 81 2 24"/><path fill="#695242" d="M67 103h16l3 10H66z"/></g><path fill="#c3ac75" stroke="#3e5842" stroke-width="2" d="M34 53q-13 9-12 33l11 2 10-26m43-9q12 9 12 33l-11 2-10-26"/><path fill="#dcbd89" d="m22 83 11 2-3 10-9-2zm65 2 11-2 2 10-9 2z"/><path fill="#63836a" stroke="#344c3d" stroke-width="2" d="m40 52 40 1 7 34-27 5-27-5z"/><path fill="#adbe92" d="m43 53 16 13 17-13-3 23H47z"/><path fill="#e2bc66" d="m56 64 4 5 5-5-1 20h-7z"/><path fill="#6b4e38" d="M34 80h52v8H34z"/><path fill="#e5c376" d="M56 80h10v8H56z"/><path fill="#d8aa77" stroke="#634f39" stroke-width="2" d="M38 28q22-21 44 0v17q-4 17-22 17T38 45z"/><path fill="#5b4434" d="M38 35V23q22-17 44 0v12l-8-12-24 4-5 12z"/><circle fill="#293d36" cx="51" cy="40" r="2.5"/><circle fill="#293d36" cx="70" cy="40" r="2.5"/><path fill="none" stroke="#8d5b3f" stroke-width="2" stroke-linecap="round" d="M53 49q7 6 14 0"/>${headwear}`);
-}
-
-/** Inventory thumbnails use the exact silhouette worn by the ranger. */
-export function renderGearIcon(id) {
-  const key = String(id ?? 'starter-cap');
-  if (/trail/.test(key)) return svg('<path fill="none" stroke="#a0bf9a" stroke-width="4" stroke-dasharray="3 8" d="M17 98q71-16 33-45T96 19"/><g fill="#f1d284"><path d="m32 82 3-8 3 8 8 3-8 3-3 8-3-8-8-3zm46-49 3-8 3 8 8 3-8 3-3 8-3-8-8-3z"/><circle cx="55" cy="57" r="6"/></g>');
-  if (/biscuit/.test(key)) return svg('<circle fill="#b58b50" stroke="#78583a" stroke-width="4" cx="60" cy="60" r="35"/><path fill="#ddbd7a" d="M34 41q28-20 51 4v33Q59 93 34 77z"/><g fill="#9a7044"><circle cx="47" cy="48" r="3"/><circle cx="72" cy="49" r="3"/><circle cx="59" cy="63" r="3"/><circle cx="45" cy="76" r="3"/><circle cx="74" cy="76" r="3"/></g>');
-  if (/torch/.test(key)) return svg('<path fill="#e7cf89" opacity=".5" d="m46 39-20-29h68L75 39z"/><path fill="#c6a261" stroke="#5b7158" stroke-width="4" d="M45 35h31v66H45z"/><path fill="#76987b" d="M40 30h41v16H40z"/><circle fill="#f5e3a6" cx="61" cy="30" r="13"/><path fill="#315c4c" d="M55 62h11v23H55z"/>');
-  return ranger(key);
-}
-
-function nova() {
-  return svg('<ellipse fill="#092d30" opacity=".35" cx="60" cy="113" rx="24" ry="5"/><path fill="#3d5546" stroke="#2b433a" stroke-width="7" d="m49 86-4 23m26-23 4 23"/><path fill="#876447" d="M35 104h18v10H32zm32 0h17l4 10H67z"/><path fill="#90a274" stroke="#405f49" stroke-width="3" d="M41 52h37l11 37-29 6-30-6z"/><path fill="#d4bc82" d="M45 53h9l6 22 7-22h8L66 87H54z"/><path fill="#c2a46f" stroke="#654f36" stroke-width="2" d="M40 28q20-17 40 0v18q-4 17-20 17T40 46z"/><path fill="#443c30" d="M39 39V25q20-23 43 0l1 21-9-9-8-16-18 15v15l-9 6z"/><path fill="#6e8552" stroke="#3f5c40" stroke-width="2" d="m32 28 9-18h39l9 18z"/><path fill="#b6c280" d="M25 28h70v10H25z"/><circle fill="#293c32" cx="52" cy="43" r="2"/><circle fill="#293c32" cx="69" cy="43" r="2"/><path fill="none" stroke="#8a5c40" stroke-width="2" d="M54 52q7 5 13-1"/><path fill="none" stroke="#91a575" stroke-width="10" stroke-linecap="round" d="m35 60-13 21m64-21 12 19"/><path fill="#c6ab79" d="m18 78 9 5-5 9-8-5zm74 0 9-4 4 10-8 4z"/><path fill="#6b5438" d="M32 85h56v6H32z"/><path fill="#e6c66f" d="M55 84h11v9H55z"/>');
-}
-
-function patch() {
-  return svg('<ellipse fill="#071e23" opacity=".35" cx="60" cy="110" rx="29" ry="6"/><g class="pw-patch-body"><path class="pw-patch-arm" fill="none" stroke="#a4864f" stroke-width="8" stroke-linecap="round" d="m31 69-13 7 1-16"/><path fill="none" stroke="#a4864f" stroke-width="8" stroke-linecap="round" d="m89 69 11 9-4 12"/><path fill="#bda467" stroke="#5b624c" stroke-width="3" d="M36 58h48l6 33-29 9-31-9z"/><path fill="#617c67" d="M43 64h34v18H43z"/><path fill="#e7c577" d="M46 69h8v7h-8zm11 0h8v7h-8zm11 0h7v7h-7z"/><circle fill="#7acbc1" cx="60" cy="89" r="4"/><path stroke="#81734e" stroke-width="8" d="m43 95-7 12m40-12 7 12"/><path fill="#a3905a" d="M28 103h17v9H25zm47 0h17l3 9H75z"/><path stroke="#b99557" stroke-width="4" d="m79 26 6-18"/><circle class="pw-patch-antenna" fill="#8ee7cf" cx="86" cy="7" r="4"/><rect fill="#9e8c54" stroke="#ddc37d" stroke-width="2" x="24" y="24" width="72" height="42" rx="16"/><rect fill="#092d36" stroke="#465d51" stroke-width="3" x="30" y="30" width="60" height="29" rx="12"/><g class="pw-patch-eyes" fill="#8fe8dc"><ellipse cx="47" cy="43" rx="7" ry="9"/><ellipse cx="73" cy="43" rx="7" ry="9"/></g><circle fill="#ede2ac" cx="29" cy="58" r="3"/><circle fill="#ede2ac" cx="91" cy="58" r="3"/></g>');
 }
 
 const sprites = {
@@ -131,9 +97,15 @@ export function renderPlayWorld(mission = {}, session = {}, game = {}, chapter =
   const opened = collected.includes(`${mission.id}:cache`);
   const equippedTrail = String(game.equipped?.trail);
   const trail = /circuit/.test(equippedTrail) ? 'circuit' : /lantern/.test(equippedTrail) ? 'lantern' : /firefly/.test(equippedTrail) ? 'fireflies' : /star|spark|glow/.test(equippedTrail) ? 'stars' : /leaf|fern/.test(equippedTrail) ? 'leaves' : 'dust';
+  const artifacts = items.map(item => {
+    const i = current.activity.items.findIndex(candidate => candidate.id === item.id);
+    const count = current.activity.items.length;
+    const kind = mission.id === 'c01-01' && item.id === 'screen' ? 'kit-screen' : mission.id === 'c01-01' && item.id === 'linux' ? 'kit-linux' : mission.id === 'c01-01' && item.id === 'viewer' ? 'kit-viewer' : 'artifact';
+    return object('artifact:' + item.id, kind, item.label, count <= 4 ? 29 + i * 15 : 24 + i * 13, 83 + (i % 2 ? 2 : -2), 'pw-clue-object');
+  }).join('');
   const starter = mission.id === 'c01-01';
   const threat = boss ? `<div class="pw-boss-obstruction" data-subdued="${done === steps.length}" data-defeated="${complete}" aria-hidden="true"><svg viewBox="0 0 260 250"><path class="pw-threat-smoke" fill="#342b51" d="m130 0 34 40 39-10-3 48 53 27-34 42 27 48-59 8-25 47-39-34-54 25-5-52-58-26 33-40-22-59 59-7z"/>${bossBody(mission.chapter)}${steps.map((_,i)=>`<path class="pw-threat-lock" data-cleared="${session.done?.[i]===true}" fill="none" stroke="#a7a3b1" stroke-width="9" stroke-linecap="round" d="M${50+i*27} 185v${i%2?23:-25}"/>`).join('')}<path class="pw-threat-crack" fill="none" stroke="#f8ca82" stroke-width="3" d="${done ? 'm127 45-12 35 20 28-16 32 11 32' : ''}"/></svg><span>${complete ? 'CLEARED' : done === steps.length ? 'Ready for the final move' : e(bossName)}</span></div>` : '';
-  return `<section class="pw-world" data-play-scene="${sceneKey}" data-boss="${boss}" data-complete="${complete}" data-progress="${done}" data-motion="on" aria-label="Explore ${e(mission.location || place.name)}"><div class="pw-scene" tabindex="0" role="group" aria-label="Adventure playfield. Click or tap the ground to walk. Use arrow keys or W A S D to move; E or Space to interact with the nearest object." style="--pw-scene-hue:${place.hue};--pw-ranger-x:${x}%;--pw-ranger-y:${y}%;--pw-patch-x:${clamp(x-9,6,94)}%;--pw-patch-y:${clamp(y+2,45,88)}%"><div class="pw-painted-backdrop" style="background-image:url('../assets/scenes/${place.atlas}');background-position:${place.crop}"></div><div class="pw-sky-wash"></div><div class="pw-distant-light"></div><div class="pw-walkground" aria-hidden="true"><svg viewBox="0 0 1200 500" preserveAspectRatio="none"><path fill="#769079" opacity=".38" d="M0 180q297-101 589-8t611-20v348H0z"/><path fill="#b2ab79" opacity=".43" d="M-70 480q162-301 518-253t822 205l-45 68H-70z"/><path fill="none" stroke="#dac994" stroke-width="3" opacity=".2" d="M0 405q228-180 568-111t632 138"/><g fill="#365a47" opacity=".8"><path d="m70 310 9-19-2 19 13-8-8 16zm925 46 10-19-2 19 13-7-9 17zM865 280l12-15-5 16 12-3-13 12zM288 412l8-23 1 22 11-5-9 14z"/></g></svg></div>${setPiece(place.prop)}<div class="pw-midground-tree pw-tree-left" aria-hidden="true"></div><div class="pw-midground-tree pw-tree-right" aria-hidden="true"></div>${threat}<div class="pw-fireflies" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div><header class="pw-location"><span class="pw-location-mark" aria-hidden="true">✦</span><span>${e(mission.location || place.name)}<small>${boss ? 'BOSS ENCOUNTER' : 'THE LIVING VALLEY'}</small></span></header><div class="pw-signal-meter" aria-label="${done} of ${steps.length} objectives solved"><span aria-hidden="true">⌁</span><div>${lights}</div></div><div class="pw-objects">${object('objective',starter?'broken-sign':'objective', getPlayScene(mission, session).current?.goal || current?.title || 'Your adventure', 26, 63, 'pw-object-primary')}${object('terminal','terminal', 'Field terminal', 66, 69)}${object('map','map','Valley map',10,57)}${object('inventory','inventory','Your adventure kit',89,80)}${object('cache',starter?'gear-crate':'cache',opened?'A very thoroughly searched crate':'Something shiny?',17,87,opened?'pw-cache-opened':'')}${object('beacon','beacon', complete?'Beacon restored':'Signal beacon',84,48,complete?'pw-beacon-lit':'')}${object('exit','exit', complete?'Continue the adventure':'Trail onwards',91,57,complete?'pw-exit-open':'')}<button type="button" class="pw-nova pw-object" data-world-object="nova" data-world-x="42" data-world-y="59" style="--pw-x:42%;--pw-y:59%" aria-label="Talk to Nova, your ranger guide">${nova()}<span class="pw-object-label">Nova</span><span class="pw-interact-dot" aria-hidden="true">···</span></button>${items.map((item,i)=>object(`artifact:${item.id}`,starter&&item.id==='screen'?'kit-screen':starter&&item.id==='linux'?'kit-linux':starter&&item.id==='viewer'?'kit-viewer':'artifact',item.label,items.length<=4?29+i*15:24+i*13,83+(i%2?2:-2),'pw-clue-object')).join('')}</div><div class="pw-ranger play-avatar" data-player-x="${x}" data-player-y="${y}" data-x="${x}" data-y="${y}" data-facing="right" data-walking="false" data-trail="${trail}" role="img" aria-label="Your ranger character"><span class="pw-trail-particles" aria-hidden="true"><i></i><i></i><i></i></span>${ranger(game.equipped?.hat)}<span class="pw-player-name">YOU</span></div><button type="button" class="pw-patch pw-object" data-world-object="patch" data-world-x="${clamp(x-9,6,94)}" data-world-y="${clamp(y+2,45,88)}" aria-label="Talk to Patch, your robot companion">${patch()}<span class="pw-object-label">Patch</span><span class="pw-patch-talk" aria-hidden="true">···</span></button><div class="pw-walk-target" hidden aria-hidden="true">◎</div><div class="pw-foreground" aria-hidden="true"><svg viewBox="0 0 1200 150" preserveAspectRatio="none"><path fill="#173d35" d="m0 150 4-91 18 47-7-65 27 56 4-81 13 80 16-40-5 48 26-18-10 34 43-8-10 38zm1200 0-7-93-17 44 4-67-24 69-7-91-13 89-23-53 6 54-25-13 13 35-36-7 8 33z"/></svg></div><div class="pw-interaction-prompt" aria-live="polite" hidden></div></div><footer class="pw-world-footer"><p><strong>Patch:</strong> <span>${e(place.quip)}</span></p><div class="pw-walk-help"><span class="pw-desktop-help"><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> walk · <kbd>E</kbd> interact</span><span class="pw-touch-help">Tap the trail to walk. Tap an object to investigate.</span></div></footer><div class="pw-touch-pad" aria-label="Walking controls"><button type="button" data-world-move="left" aria-label="Walk left">←</button><button type="button" data-world-move="up" aria-label="Walk towards the back">↑</button><button type="button" data-world-move="down" aria-label="Walk towards the front">↓</button><button type="button" data-world-move="right" aria-label="Walk right">→</button><button type="button" data-world-interact aria-label="Interact with the nearest object">✦</button></div></section>`;
+  return `<section class="pw-world" data-play-scene="${sceneKey}" data-boss="${boss}" data-complete="${complete}" data-progress="${done}" data-motion="on" aria-label="Explore ${e(mission.location || place.name)}"><div class="pw-scene" tabindex="0" role="group" aria-label="Adventure playfield. Click or tap the ground to walk. Use arrow keys or W A S D to move; E or Space to interact with the nearest object." style="--pw-scene-hue:${place.hue};--pw-ranger-x:${x}%;--pw-ranger-y:${y}%;--pw-patch-x:${clamp(x-9,6,94)}%;--pw-patch-y:${clamp(y+2,45,88)}%"><div class="pw-painted-backdrop" style="background-image:url('../assets/scenes/${place.atlas}');background-position:${place.crop}"></div><div class="pw-sky-wash"></div><div class="pw-distant-light"></div><div class="pw-walkground" aria-hidden="true"><svg viewBox="0 0 1200 500" preserveAspectRatio="none"><path fill="#769079" opacity=".38" d="M0 180q297-101 589-8t611-20v348H0z"/><path fill="#b2ab79" opacity=".43" d="M-70 480q162-301 518-253t822 205l-45 68H-70z"/><path fill="none" stroke="#dac994" stroke-width="3" opacity=".2" d="M0 405q228-180 568-111t632 138"/><g fill="#365a47" opacity=".8"><path d="m70 310 9-19-2 19 13-8-8 16zm925 46 10-19-2 19 13-7-9 17zM865 280l12-15-5 16 12-3-13 12zM288 412l8-23 1 22 11-5-9 14z"/></g></svg></div>${setPiece(place.prop)}<div class="pw-midground-tree pw-tree-left" aria-hidden="true"></div><div class="pw-midground-tree pw-tree-right" aria-hidden="true"></div>${threat}<div class="pw-fireflies" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div><header class="pw-location"><span class="pw-location-mark" aria-hidden="true">✦</span><span>${e(mission.location || place.name)}<small>${boss ? 'BOSS ENCOUNTER' : 'THE LIVING VALLEY'}</small></span></header><div class="pw-signal-meter" aria-label="${done} of ${steps.length} objectives solved"><span aria-hidden="true">⌁</span><div>${lights}</div></div><div class="pw-objects">${object('objective',starter?'broken-sign':'objective', getPlayScene(mission, session).current?.goal || current?.title || 'Your adventure', 26, 63, 'pw-object-primary')}${object('terminal','terminal', 'Field terminal', 66, 69)}${object('map','map','Valley map',10,57)}${object('inventory','inventory','Your adventure kit',89,80)}${object('cache',starter?'gear-crate':'cache',opened?'A very thoroughly searched crate':'Something shiny?',17,87,opened?'pw-cache-opened':'')}${object('beacon','beacon', complete?'Beacon restored':'Signal beacon',84,48,complete?'pw-beacon-lit':'')}${object('exit','exit', complete?'Continue the adventure':'Trail onwards',91,57,complete?'pw-exit-open':'')}<button type="button" class="pw-nova pw-object" data-world-object="nova" data-world-x="42" data-world-y="59" style="--pw-x:42%;--pw-y:59%" aria-label="Talk to Nova, your ranger guide">${renderNova()}<span class="pw-object-label">Nova</span><span class="pw-interact-dot" aria-hidden="true">···</span></button>${artifacts}</div><div class="pw-ranger play-avatar" data-player-x="${x}" data-player-y="${y}" data-x="${x}" data-y="${y}" data-facing="right" data-facing-horizontal="right" data-walking="false" data-trail="${trail}" role="img" aria-label="Your ranger character"><span class="pw-trail-particles" aria-hidden="true"><i></i><i></i><i></i></span>${renderRanger(game.equipped?.hat)}<span class="pw-player-name">YOU</span></div><button type="button" class="pw-patch pw-object" data-world-object="patch" data-world-x="${clamp(x-9,6,94)}" data-world-y="${clamp(y+2,45,88)}" aria-label="Talk to Patch, your robot companion">${renderPatch()}<span class="pw-object-label">Patch</span><span class="pw-patch-talk" aria-hidden="true">···</span></button><div class="pw-walk-target" hidden aria-hidden="true">◎</div><div class="pw-foreground" aria-hidden="true"><svg viewBox="0 0 1200 150" preserveAspectRatio="none"><path fill="#173d35" d="m0 150 4-91 18 47-7-65 27 56 4-81 13 80 16-40-5 48 26-18-10 34 43-8-10 38zm1200 0-7-93-17 44 4-67-24 69-7-91-13 89-23-53 6 54-25-13 13 35-36-7 8 33z"/></svg></div><div class="pw-interaction-prompt" aria-live="polite" hidden></div></div><footer class="pw-world-footer"><p><strong>Patch:</strong> <span>${e(place.quip)}</span></p><div class="pw-walk-help"><span class="pw-desktop-help"><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> walk · <kbd>E</kbd> interact</span><span class="pw-touch-help">Tap the trail to walk. Tap an object to investigate.</span></div></footer><div class="pw-touch-stick" data-world-stick role="group" aria-label="Thumbstick walking controls"><span class="pw-stick-ring"><span class="pw-stick-knob"></span></span><span class="pw-stick-caption">WALK</span></div><div class="pw-touch-pad" aria-label="Walking controls"><button type="button" data-world-move="left" aria-label="Walk left">←</button><button type="button" data-world-move="up" aria-label="Walk towards the back">↑</button><button type="button" data-world-move="down" aria-label="Walk towards the front">↓</button><button type="button" data-world-move="right" aria-label="Walk right">→</button><button type="button" data-world-interact aria-label="Interact with the nearest object">✦</button></div></section>`;
 }
 
 /** Mount once after rendering; always call the returned cleanup before replacing markup. */
@@ -145,27 +117,34 @@ export function mountPlayWorld(root, { onInteract = () => {}, onPosition = () =>
   const companion = world.querySelector('.pw-patch');
   const marker = world.querySelector('.pw-walk-target');
   const prompt = world.querySelector('.pw-interaction-prompt');
+  const stick = world.querySelector('[data-world-stick]');
+  const scenery = world.querySelector('.pw-setpiece');
   const controller = new AbortController();
   const { signal } = controller;
   const style = stage.style;
   let position = { x: parseFloat(style.getPropertyValue('--pw-ranger-x')) || 18, y: parseFloat(style.getPropertyValue('--pw-ranger-y')) || 72 };
   let patchPosition = { x: position.x - 9, y: position.y + 2 };
   let publishedPosition = { ...position };
-  let target = null;
+  let velocity = { x: 0, y: 0 };
+  let analog = { x: 0, y: 0 };
+  let stickPointer = null;
+  let route = [];
   let pendingInteraction = null;
-  let raf = 0;
-  let previous = 0;
-  let lastSaved = 0;
-  let disposed = false;
-  let moving = false;
-  let nearId = '';
-  const held = new Set();
+  let raf = 0, previous = 0, lastSaved = 0, phase = 0;
+  let disposed = false, nearId = '', markerTimer;
+  let aspect = 1.7, pace = 25, reach = 7.5, stridePixels = 80, obstacles = [];
+  let stageBounds;
+  let yScale = 1, yOffset = 0;
+  const projectY = y => y * yScale + yOffset;
+  const unprojectY = y => (y - yOffset) / yScale;
+  const keyboard = new Map();
+  const touchDirections = new Map();
   const reduced = !motion || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   world.dataset.motion = reduced ? 'off' : 'on';
   const listen = (node, event, listener, options = {}) => node?.addEventListener(event, listener, { ...options, signal });
   const objects = () => [...world.querySelectorAll('[data-world-object]')];
   const objectPosition = node => node === companion ? patchPosition : ({ x: Number(node.dataset.worldX), y: Number(node.dataset.worldY) });
-  const distance = (a, b) => Math.hypot(a.x - b.x, (a.y - b.y) * .72);
+  const distance = (a, b) => walkDistance(a, b, aspect);
   const save = () => {
     const next = { x: Math.round(position.x * 100) / 100, y: Math.round(position.y * 100) / 100 };
     if (next.x === publishedPosition.x && next.y === publishedPosition.y) return;
@@ -173,139 +152,395 @@ export function mountPlayWorld(root, { onInteract = () => {}, onPosition = () =>
     onPosition({ ...next });
   };
   const isEditing = node => node?.closest?.('input, textarea, select, [contenteditable="true"], [role="textbox"]');
-  const blocked = () => disposed || !world.isConnected || document.querySelector('dialog[open], #game-panel') || document.hidden;
+  const blocked = () => disposed || !world.isConnected || document.querySelector('dialog[open], #game-panel, .play-onboarding[data-world-blocked="true"]') || document.hidden;
+
+  // Footprints follow the painted SVG at every screen size instead of using a
+  // desktop-only invisible rectangle. The roof can occlude a ranger behind it.
+  const footprints = {
+    cabin: [[115, 290, 545, 430]], maps: [[95, 340, 560, 435]],
+    library: [[150, 300, 535, 410]], burrow: [[50, 290, 600, 430]],
+    camp: [[90, 310, 420, 407], [437, 360, 555, 423]],
+    relay: [[220, 300, 390, 430]], gate: [[95, 310, 540, 430]],
+    post: [[115, 300, 525, 430]], bridge: [],
+    lookout: [[185, 300, 445, 430]], machine: [[105, 280, 510, 430]],
+    summit: [[220, 290, 410, 435]],
+  };
+  function refreshGeometry() {
+    stageBounds = stage.getBoundingClientRect();
+    stridePixels = Math.max(48, player.getBoundingClientRect().width * 0.95);
+    if (!stageBounds.width || !stageBounds.height) return;
+    const narrow = stageBounds.width <= 760, short = stageBounds.height <= 560;
+    const projection = narrow ? { top: 28, bottom: 64 } : short ? { top: 29, bottom: 69 } : { top: 36, bottom: 79 };
+    yScale = (projection.bottom - projection.top) / (WALK_BOUNDS.bottom - WALK_BOUNDS.top);
+    yOffset = projection.top - WALK_BOUNDS.top * yScale;
+    aspect = stageBounds.width / (stageBounds.height * yScale);
+    world.dataset.walkProjection = JSON.stringify({ scale: yScale, offset: yOffset });
+    world.style.setProperty('--pw-y-scale', String(yScale));
+    world.style.setProperty('--pw-y-offset', yOffset + '%');
+    for (const node of objects()) if (node !== companion) node.style.setProperty('--pw-y', projectY(Number(node.dataset.worldY)) + '%');
+    // Same speed in both axes, with a comfortable phone pace and a bounded
+    // desktop pace. Keyboard diagonals cannot run faster than straight walks.
+    pace = Math.max(145, Math.min(340, stageBounds.width * 0.24)) / stageBounds.width * 100;
+    reach = Math.max(43, Math.min(90, stageBounds.width * 0.073)) / stageBounds.width * 100;
+    obstacles = [];
+    if (scenery) {
+      scenery.style.transform = 'none';
+      const original = scenery.getBoundingClientRect();
+      const lift = yOffset / 100 * stageBounds.height + (yScale - 1) * (original.top - stageBounds.top);
+      scenery.style.transformOrigin = '50% 0';
+      scenery.style.transform = 'translateY(' + lift + 'px) scale(' + yScale + ')';
+      const rect = scenery.getBoundingClientRect();
+      const scale = Math.min(rect.width / 640, rect.height / 460);
+      const left = rect.left - stageBounds.left + (rect.width - 640 * scale) / 2;
+      const top = rect.top - stageBounds.top + (rect.height - 460 * scale) / 2;
+      for (const [x1, y1, x2, y2] of footprints[scenery.dataset.prop] || []) {
+        obstacles.push({
+          left: (left + x1 * scale) / stageBounds.width * 100 - 0.8,
+          right: (left + x2 * scale) / stageBounds.width * 100 + 0.8,
+          top: unprojectY((top + y1 * scale) / stageBounds.height * 100) - 0.8 * aspect,
+          bottom: unprojectY((top + y2 * scale) / stageBounds.height * 100) + 0.8 * aspect,
+        });
+      }
+      const bottom = obstacles.length ? Math.max(...obstacles.map(rect => rect.bottom)) : 56;
+      scenery.style.zIndex = String(100 + Math.round(bottom - 0.8 * aspect));
+    }
+    // Nova stands in front of the building, not painted into its wall. A
+    // responsive SVG changes its footline, so a hard-coded NPC depth is unsafe.
+    const nova = world.querySelector('[data-world-object="nova"]');
+    if (nova) {
+      nova.dataset.worldBaseY ||= nova.dataset.worldY;
+      const point = { x: Number(nova.dataset.worldX), y: Number(nova.dataset.worldBaseY) };
+      for (const rect of obstacles) {
+        if (point.x >= rect.left - 2 && point.x <= rect.right + 2 && point.y >= rect.top - 10 && point.y <= rect.bottom + 1) {
+          point.y = Math.min(WALK_BOUNDS.bottom - 2, rect.bottom + 2.1);
+        }
+      }
+      nova.dataset.worldY = String(point.y);
+      nova.style.setProperty('--pw-y', projectY(point.y) + '%');
+      nova.style.zIndex = String(100 + Math.ceil(point.y));
+    }
+    world.dataset.walkObstacles = JSON.stringify(obstacles);
+    world.dataset.walkAspect = String(aspect);
+    world.dataset.walkSpeed = String(pace);
+    world.dataset.walkReach = String(reach);
+    const legal = walkablePoint(position, obstacles, WALK_BOUNDS, aspect);
+    if (legal) position = legal;
+    if (route.length) route = planWalk(position, route.at(-1), obstacles, WALK_BOUNDS, aspect);
+    draw();
+  }
+
+  function nearestObject() {
+    const nearby = objects().map(node => ({ node, d: distance(position, objectPosition(node)) }));
+    nearby.sort((a, b) => a.d - b.d);
+    // Patch follows the player: he must not swallow every interaction key.
+    return nearby.find(item => item.node !== companion && item.d < reach) || nearby[0];
+  }
 
   function draw() {
-    style.setProperty('--pw-ranger-x', `${position.x}%`);
-    style.setProperty('--pw-ranger-y', `${position.y}%`);
-    style.setProperty('--pw-patch-x', `${patchPosition.x}%`);
-    style.setProperty('--pw-patch-y', `${patchPosition.y}%`);
+    style.setProperty('--pw-ranger-x', position.x + '%');
+    style.setProperty('--pw-ranger-y', projectY(position.y) + '%');
+    style.setProperty('--pw-patch-x', patchPosition.x + '%');
+    style.setProperty('--pw-patch-y', projectY(patchPosition.y) + '%');
     player.dataset.playerX = player.dataset.x = String(Math.round(position.x * 100) / 100);
     player.dataset.playerY = player.dataset.y = String(Math.round(position.y * 100) / 100);
     player.style.zIndex = String(100 + Math.round(position.y));
     companion.style.zIndex = String(100 + Math.round(patchPosition.y));
     companion.dataset.worldX = String(patchPosition.x);
     companion.dataset.worldY = String(patchPosition.y);
-    const nearby = objects().map(node => ({ node, d: distance(position, objectPosition(node)) })).sort((a,b) => a.d-b.d)[0];
-    const id = nearby && nearby.d < 13 ? nearby.node.dataset.worldObject : '';
+    const nearby = nearestObject();
+    const id = nearby && nearby.d < reach ? nearby.node.dataset.worldObject : '';
     if (id !== nearId) {
       objects().forEach(node => node.classList.toggle('pw-in-reach', node.dataset.worldObject === id));
       nearId = id;
       prompt.hidden = !id;
-      prompt.textContent = id ? `✦ ${nearby.node.getAttribute('aria-label')}` : '';
+      prompt.textContent = id ? 'E · ' + nearby.node.getAttribute('aria-label') : '';
     }
   }
 
-  function finishInteraction(id) {
-    target = null;
+  function clearRoute() {
+    route = [];
     pendingInteraction = null;
     marker.hidden = true;
+    clearTimeout(markerTimer);
+    world.querySelector('.pw-walk-route')?.remove();
+  }
+
+  function showRoute(points, corrected = false) {
+    clearTimeout(markerTimer);
+    const goal = points.at(-1);
+    if (!goal) { marker.hidden = true; return; }
+    marker.style.left = goal.x + '%';
+    marker.style.top = projectY(goal.y) + '%';
+    marker.dataset.state = 'walking';
+    marker.dataset.corrected = String(corrected);
+    marker.hidden = false;
+    let path = world.querySelector('.pw-walk-route');
+    if (!path) {
+      path = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      path.setAttribute('viewBox', '0 0 100 100');
+      path.setAttribute('preserveAspectRatio', 'none');
+      path.setAttribute('aria-hidden', 'true');
+      path.classList.add('pw-walk-route');
+      stage.insertBefore(path, marker);
+    }
+    const trail = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    trail.setAttribute('points', [position, ...points].map(point => point.x + ',' + projectY(point.y)).join(' '));
+    path.replaceChildren(trail);
+  }
+
+  function arrived() {
+    route = [];
+    velocity = { x: 0, y: 0 };
     player.dataset.walking = 'false';
+    player.style.setProperty('--pw-speed', '0');
+    player.style.setProperty('--pw-stride', '0');
+    world.querySelector('.pw-walk-route')?.remove();
+    marker.dataset.state = 'arrived';
+    markerTimer = setTimeout(() => { marker.hidden = true; }, reduced ? 150 : 400);
     save();
+  }
+
+  function finishInteraction(id) {
+    pendingInteraction = null;
+    arrived();
     if (!disposed && !blocked()) onInteract(id);
+  }
+
+  function walkTo(goal, interaction = null) {
+    clearRoute();
+    const next = planWalk(position, goal, obstacles, WALK_BOUNDS, aspect);
+    if (!next.length) {
+      prompt.textContent = 'That way is blocked. Try a clear patch of trail.';
+      prompt.hidden = false;
+      return;
+    }
+    route = next;
+    pendingInteraction = interaction;
+    showRoute(route, distance(goal, route.at(-1)) > 0.1);
+    stage.focus({ preventScroll: true });
+    schedule();
   }
 
   function interact(node) {
     if (!node || blocked()) return;
     const id = node.dataset.worldObject;
     const goal = objectPosition(node);
-    held.clear();
-    if (distance(position, goal) < 13) return finishInteraction(id);
-    pendingInteraction = id;
-    target = { x: clamp(goal.x, 5, 95), y: clamp(goal.y + 4, 45, 88) };
-    marker.style.left = `${target.x}%`;
-    marker.style.top = `${target.y}%`;
-    marker.hidden = false;
-    schedule();
+    const interactionRange = id === 'nova' ? Math.max(reach, (player.getBoundingClientRect().width + node.getBoundingClientRect().width) * 0.57 / stageBounds.width * 100) : reach;
+    keyboard.clear(); touchDirections.clear(); analog = { x: 0, y: 0 };
+    if (distance(position, goal) <= interactionRange) return finishInteraction(id);
+    // Choose a reachable approach, never the centre of a solid cabin or desk.
+    const candidates = [];
+    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 12) {
+      for (const radius of id === 'nova' ? [interactionRange * 0.95] : [interactionRange * 0.65, interactionRange * 0.9]) {
+        const point = { x: goal.x + Math.cos(angle) * radius, y: goal.y + Math.sin(angle) * radius * aspect };
+        if (!isWalkable(point, obstacles)) continue;
+        const path = planWalk(position, point, obstacles, WALK_BOUNDS, aspect);
+        if (!path.length) continue;
+        const chain = [position, ...path];
+        const cost = chain.slice(1).reduce((sum, value, index) => sum + distance(chain[index], value), 0);
+        candidates.push({ point, cost });
+      }
+    }
+    candidates.sort((a, b) => a.cost - b.cost);
+    walkTo(candidates[0]?.point || goal, id);
+  }
+
+  function inputVector() {
+    let x = analog.x, y = analog.y;
+    const directions = new Set([...keyboard.values(), ...touchDirections.values()]);
+    x += (directions.has('right') ? 1 : 0) - (directions.has('left') ? 1 : 0);
+    y += (directions.has('down') ? 1 : 0) - (directions.has('up') ? 1 : 0);
+    const length = Math.hypot(x, y);
+    return length > 1 ? { x: x / length, y: y / length } : { x, y };
   }
 
   function schedule() { if (!raf && !disposed) raf = requestAnimationFrame(frame); }
   function frame(time) {
     raf = 0;
-    if (blocked()) { held.clear(); target = null; pendingInteraction = null; marker.hidden = true; player.dataset.walking = 'false'; previous = 0; return; }
-    const dt = Math.min(.045, previous ? (time - previous) / 1000 : .016);
+    if (blocked()) { stopWalking(); return; }
+    const dt = Math.min(0.05, previous ? (time - previous) / 1000 : 1 / 60);
     previous = time;
-    let dx = (held.has('right') ? 1 : 0) - (held.has('left') ? 1 : 0);
-    let dy = (held.has('down') ? 1 : 0) - (held.has('up') ? 1 : 0);
+    let input = inputVector();
+    const manual = Math.hypot(input.x, input.y) > 0.01;
     const before = { ...position };
-    if (dx || dy) {
-      target = null; pendingInteraction = null; marker.hidden = true;
-      const length = Math.hypot(dx, dy);
-      position.x = clamp(position.x + dx / length * 25 * dt, 5, 95);
-      position.y = clamp(position.y + dy / length * 20 * dt, 45, 88);
-    } else if (target) {
-      dx = target.x - position.x; dy = target.y - position.y;
-      const length = Math.hypot(dx, dy);
-      if (length < 1.1 || (pendingInteraction && length < 8)) {
-        if (pendingInteraction) { draw(); return finishInteraction(pendingInteraction); }
-        position = { ...target }; target = null; marker.hidden = true;
+    if (manual) clearRoute();
+    else if (route.length) {
+      const goal = route[0];
+      const dx = goal.x - position.x, dy = (goal.y - position.y) / aspect;
+      const remaining = Math.hypot(dx, dy);
+      if (remaining < 0.16) {
+        position = { ...goal };
+        route.shift();
+        velocity = { x: 0, y: 0 };
+        if (!route.length) {
+          draw();
+          if (pendingInteraction) return finishInteraction(pendingInteraction);
+          arrived();
+        }
       } else {
-        const amount = Math.min(length, 31 * dt);
-        position.x += dx / length * amount;
-        position.y += dy / length * amount;
+        // Stop precisely at bends and at the target rather than drifting through
+        // a wall or orbiting an interaction. Acceleration resumes on the next leg.
+        const desiredPace = Math.min(pace, Math.max(1.8, remaining * 9));
+        input = { x: dx / remaining * desiredPace / pace, y: dy / remaining * desiredPace / pace };
       }
     }
-    moving = distance(position, before) > .01;
+    const movement = integrateWalk(velocity, input, dt, { speed: pace, aspect });
+    velocity = movement.velocity;
+    if (route.length && !manual) {
+      const goal = route[0];
+      const remaining = distance(position, goal);
+      if (walkDistance({ x: 0, y: 0 }, movement.delta, aspect) >= remaining) {
+        position = { ...goal };
+        velocity = { x: 0, y: 0 };
+        route.shift();
+        if (!route.length) {
+          draw();
+          if (pendingInteraction) return finishInteraction(pendingInteraction);
+          arrived();
+        }
+      } else position = moveOnTrail(position, movement.delta, obstacles, WALK_BOUNDS, aspect);
+    } else position = moveOnTrail(position, movement.delta, obstacles, WALK_BOUNDS, aspect);
+    const travelled = distance(position, before);
+    const moving = travelled > 0.001;
     player.dataset.walking = String(moving);
-    if (Math.abs(position.x - before.x) > .01) player.dataset.facing = position.x < before.x ? 'left' : 'right';
-    const follow = { x: clamp(position.x + (player.dataset.facing === 'left' ? 9 : -9), 5, 95), y: clamp(position.y + 2, 45, 88) };
-    const patchDistance = distance(patchPosition, follow);
-    if (patchDistance > .3) {
-      const smoothing = Math.min(1, dt * 5);
-      patchPosition.x += (follow.x - patchPosition.x) * smoothing;
-      patchPosition.y += (follow.y - patchPosition.y) * smoothing;
+    const speedRatio = Math.min(1, Math.hypot(velocity.x, velocity.y) / pace);
+    if (moving) {
+      const dx = position.x - before.x, dy = (position.y - before.y) / aspect;
+      if (Math.abs(dx) > 0.002) player.dataset.facingHorizontal = dx < 0 ? 'left' : 'right';
+      player.dataset.facing = Math.abs(dy) > Math.abs(dx) * 1.25 ? (dy < 0 ? 'up' : 'down') : (dx < 0 ? 'left' : 'right');
+      phase += travelled / 100 * stageBounds.width / stridePixels * Math.PI * 2;
+      player.style.setProperty('--pw-heading-y', String(dy / Math.max(0.001, travelled)));
     }
+    player.style.setProperty('--pw-speed', String(moving ? speedRatio : 0));
+    player.style.setProperty('--pw-step-phase', String(phase));
+    player.style.setProperty('--pw-stride', String(moving && !reduced ? Math.sin(phase) : 0));
+    const follow = walkablePoint({
+      x: clamp(position.x + (player.dataset.facingHorizontal === 'left' ? 7 : -7), 5, 95),
+      y: clamp(position.y + 2.7, 45, 88),
+    }, obstacles, WALK_BOUNDS, aspect) || position;
+    const patchDistance = distance(patchPosition, follow);
+    if (patchDistance > 0.1) {
+      const waypoint = planWalk(patchPosition, follow, obstacles, WALK_BOUNDS, aspect)[0] || follow;
+      const smoothing = 1 - Math.exp(-4.8 * dt);
+      patchPosition = moveOnTrail(patchPosition, { x: (waypoint.x - patchPosition.x) * smoothing, y: (waypoint.y - patchPosition.y) * smoothing }, obstacles, WALK_BOUNDS, aspect);
+    }
+    companion.dataset.walking = String(patchDistance > 0.4);
     draw();
-    if (moving && time - lastSaved > 750) { lastSaved = time; save(); }
-    if (held.size || target || patchDistance > .5) schedule();
-    else { previous = 0; if (moving) save(); }
+    if (moving && time - lastSaved > 650) { lastSaved = time; save(); }
+    if (manual || route.length || Math.hypot(velocity.x, velocity.y) > 0.01 || patchDistance > 0.25) schedule();
+    else { previous = 0; save(); }
+  }
+
+  function stopWalking() {
+    keyboard.clear(); touchDirections.clear(); clearRoute();
+    analog = { x: 0, y: 0 }; velocity = { x: 0, y: 0 }; previous = 0;
+    player.dataset.walking = 'false';
+    player.style.setProperty('--pw-speed', '0');
+    player.style.setProperty('--pw-stride', '0');
+    resetStick(); save();
   }
 
   listen(stage, 'click', event => {
     const node = event.target.closest?.('[data-world-object]');
     if (node) { event.preventDefault(); interact(node); return; }
-    if (event.target.closest?.('button, a')) return;
-    if (blocked()) return;
-    const bounds = stage.getBoundingClientRect();
-    target = { x: clamp((event.clientX - bounds.left) / bounds.width * 100, 5, 95), y: clamp((event.clientY - bounds.top) / bounds.height * 100, 45, 88) };
-    held.clear(); pendingInteraction = null;
-    marker.style.left = `${target.x}%`; marker.style.top = `${target.y}%`; marker.hidden = false;
-    stage.focus({ preventScroll: true }); schedule();
+    if (event.target.closest?.('button, a') || blocked()) return;
+    refreshGeometry();
+    keyboard.clear(); touchDirections.clear(); analog = { x: 0, y: 0 };
+    walkTo({ x: clamp((event.clientX - stageBounds.left) / stageBounds.width * 100, 5, 95), y: clamp(unprojectY((event.clientY - stageBounds.top) / stageBounds.height * 100), 45, 88) });
   });
+
   const keys = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ArrowUp: 'up', w: 'up', W: 'up', ArrowDown: 'down', s: 'down', S: 'down' };
   listen(document, 'keydown', event => {
     if (blocked() || isEditing(event.target) || event.altKey || event.ctrlKey || event.metaKey) return;
     if (!world.contains(document.activeElement) && document.activeElement !== document.body) return;
-    if (keys[event.key]) { event.preventDefault(); held.add(keys[event.key]); schedule(); }
-    else if ((event.key.toLowerCase() === 'e' || event.code === 'Space') && !event.target.closest('button')) {
+    if (keys[event.key]) {
+      event.preventDefault(); keyboard.set(event.code || event.key, keys[event.key]); schedule();
+    } else if ((event.key.toLowerCase() === 'e' || event.code === 'Space') && !event.target.closest('button')) {
+      if (event.repeat) return;
       event.preventDefault();
-      const nearest = objects().map(node => ({ node, d: distance(position, objectPosition(node)) })).sort((a,b) => a.d-b.d)[0];
-      if (nearest) interact(nearest.node);
+      const focused = document.activeElement?.closest?.('[data-world-object]');
+      const nearest = focused && world.contains(focused) ? focused : nearestObject()?.node;
+      if (nearest) interact(nearest);
     }
   });
-  listen(document, 'keyup', event => { if (keys[event.key]) { held.delete(keys[event.key]); if (!held.size) save(); } });
-  const stopWalking = () => { held.clear(); target = null; pendingInteraction = null; previous = 0; marker.hidden = true; player.dataset.walking = 'false'; save(); };
+  listen(document, 'keyup', event => {
+    if (!keys[event.key]) return;
+    keyboard.delete(event.code || event.key);
+    schedule();
+  });
   listen(globalThis, 'blur', stopWalking);
   listen(document, 'visibilitychange', () => { if (document.hidden) stopWalking(); });
+
   world.querySelectorAll('[data-world-move]').forEach(button => {
     const direction = button.dataset.worldMove;
     listen(button, 'pointerdown', event => {
       if (blocked()) return;
-      event.preventDefault(); button.setPointerCapture?.(event.pointerId); held.add(direction); stage.focus({ preventScroll: true }); schedule();
+      event.preventDefault();
+      button.setPointerCapture?.(event.pointerId);
+      touchDirections.set(event.pointerId, direction);
+      stage.focus({ preventScroll: true }); schedule();
     });
-    const release = () => { held.delete(direction); save(); };
-    listen(button, 'pointerup', release); listen(button, 'pointercancel', release); listen(button, 'lostpointercapture', release);
+    const release = event => { touchDirections.delete(event.pointerId); schedule(); };
+    listen(button, 'pointerup', release);
+    listen(button, 'pointercancel', release);
+    listen(button, 'lostpointercapture', release);
     listen(button, 'click', event => {
       if (event.detail !== 0 || blocked()) return;
-      position.x = clamp(position.x + (direction === 'left' ? -5 : direction === 'right' ? 5 : 0), 5, 95);
-      position.y = clamp(position.y + (direction === 'up' ? -4 : direction === 'down' ? 4 : 0), 45, 88);
-      draw(); save();
+      const goal = { x: position.x + (direction === 'left' ? -4 : direction === 'right' ? 4 : 0), y: position.y + (direction === 'up' ? -4 * aspect : direction === 'down' ? 4 * aspect : 0) };
+      walkTo(goal);
     });
   });
-  listen(world.querySelector('[data-world-interact]'), 'click', () => {
-    const nearest = objects().map(node => ({ node, d: distance(position, objectPosition(node)) })).sort((a,b) => a.d-b.d)[0];
-    if (nearest) interact(nearest.node);
+
+  function resetStick() {
+    stickPointer = null;
+    if (!stick) return;
+    stick.dataset.active = 'false';
+    stick.style.setProperty('--pw-stick-x', '0px');
+    stick.style.setProperty('--pw-stick-y', '0px');
+  }
+  function updateStick(event) {
+    if (!stick || event.pointerId !== stickPointer) return;
+    const bounds = stick.getBoundingClientRect();
+    const radius = Math.max(20, Math.min(bounds.width, bounds.height) * 0.3);
+    const dx = event.clientX - bounds.left - bounds.width / 2, dy = event.clientY - bounds.top - bounds.height / 2;
+    const length = Math.hypot(dx, dy), strength = Math.min(1, length / radius);
+    analog = length < 4 ? { x: 0, y: 0 } : { x: dx / length * strength, y: dy / length * strength };
+    stick.style.setProperty('--pw-stick-x', analog.x * radius + 'px');
+    stick.style.setProperty('--pw-stick-y', analog.y * radius + 'px');
+    schedule();
+  }
+  listen(stick, 'pointerdown', event => {
+    if (blocked() || stickPointer !== null) return;
+    event.preventDefault();
+    stickPointer = event.pointerId;
+    stick.setPointerCapture?.(event.pointerId);
+    stick.dataset.active = 'true';
+    stage.focus({ preventScroll: true });
+    updateStick(event);
   });
+  listen(stick, 'pointermove', event => {
+    if (event.pointerId !== stickPointer) return;
+    event.preventDefault(); updateStick(event);
+  });
+  const releaseStick = event => {
+    if (event.pointerId !== stickPointer) return;
+    analog = { x: 0, y: 0 }; resetStick(); schedule();
+  };
+  listen(stick, 'pointerup', releaseStick);
+  listen(stick, 'pointercancel', releaseStick);
+  listen(stick, 'lostpointercapture', releaseStick);
+  listen(world.querySelector('[data-world-interact]'), 'click', () => { const nearest = nearestObject(); if (nearest) interact(nearest.node); });
+
+  const observer = globalThis.ResizeObserver ? new ResizeObserver(refreshGeometry) : null;
+  observer?.observe(stage);
+  listen(globalThis, 'resize', refreshGeometry);
+  refreshGeometry();
   draw();
-  return () => { if (!disposed) save(); disposed = true; controller.abort(); if (raf) cancelAnimationFrame(raf); held.clear(); };
+  return () => {
+    if (!disposed) save();
+    disposed = true; controller.abort(); observer?.disconnect();
+    clearTimeout(markerTimer);
+    if (raf) cancelAnimationFrame(raf);
+    keyboard.clear(); touchDirections.clear();
+  };
 }

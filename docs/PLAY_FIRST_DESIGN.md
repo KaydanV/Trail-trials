@@ -5,7 +5,7 @@ open a new part of the valley, or beat a stubborn machine. The computer skill is
 the useful action that makes that possible. A correct selection on a worksheet
 is not enough of a consequence to carry the adventure.
 
-The first minute has one small comic accident: Patch's welcome demonstration
+The opening has one small comic accident: Patch's welcome demonstration
 scatters the field kit. The player moves, meets Patch, collects a part, opens the
 pack and fits it at the bench. Nova then agrees the actual scope of the first
 investigation. That supplies a reason to learn the screen/operating-system/tool/
@@ -13,11 +13,50 @@ file distinction: the player is putting their equipment together. The four
 existing activity IDs and their grading remain intact; the physical play and
 spoken lines give them purpose.
 
-The tutorial uses six short, event-gated prompts. A prompt advances when the
-player performs its action, with a visible skip control and replay available.
-Movement works with touch and pointer controls; a keyboard route must remain
-available. Nothing important depends on dragging, animation, sound or speed.
-No five-paragraph modal is required before touching the world.
+The adventure fills the play viewport. The world remains behind compact,
+in-context guidance, dialogue, objectives and the equipment belt. A player
+should not have to scroll past page furniture to find their ranger or open a
+second little game inside the page. Gadgets temporarily take the attention
+they need, then close back onto the same world and position.
+
+The opening has a complete seven-step controls rehearsal before free play:
+
+1. Meet Patch and choose to start the guide.
+2. Actually walk a short distance with pointer, keyboard or touch controls.
+3. Actually talk to Patch, learning how characters and optional hints work.
+4. Actually investigate a crate, learning what objects and rewards do.
+5. Open the backpack and equip an owned hat, seeing the ranger change.
+6. Open a harmless practice gadget, run `help` and `pwd`, read the replies,
+   and close it. This console does not touch mission files or award credit.
+7. Find the persistent goal, understand the first rescue and Nova check-in,
+   learn where notes and save transfer live, and choose to begin the adventure.
+
+Only the welcome and final acknowledgement use a next-style button. Practical
+steps advance on the actual action; a large instruction panel cannot be left
+covering the action it asks the player to perform. A compact pointer or device-
+appropriate control tip accompanies the active task. Talking to characters,
+walking and moving equipment are playable from the start of this rehearsal.
+The player can skip it or replay it from the menu. Replaying a searched crate
+or re-equipping an already owned hat teaches the controls without minting new
+items or requiring a purchase.
+
+`controlsTutorial` supplies the seven presentation-only guide steps. Each has
+an ID, observed gate, speaker, concise direction, action, target selector,
+success response and an optional device-specific tip. Its gate sequence is
+`continue`, `move`, `meet-patch`, `collect-cache`, `equip-hat`,
+`practice-console`, `start-adventure`. Guide completion is separate from
+learning saves, knowledge checks and mission rewards. Returning players get
+the supplied `returningText` at the introduction and handoff instead of being
+told their current mission is the first kit rescue. The controls preview can
+be replayed on their current encounter without changing earned progress.
+
+The six existing `tutorialBeats` remain the first encounter's story gates,
+including verified kit assembly and the agreed investigation scope. They are
+not six more lecture slides. Their IDs, order and earned-progress rules remain
+stable for existing saves. Finishing or skipping the controls rehearsal retires
+the old presentation counter; the mission runtime still requires actual kit
+assembly and the investigation decision. Nothing important depends on dragging, animation,
+sound or speed; every practical interaction has a keyboard and touch route.
 
 Each encounter follows a readable loop:
 
@@ -62,7 +101,8 @@ The player wins by changing the checked state or building the supported case.
 
 `living-valley/play-script.js` contains twelve chapter voices, a distinct short
 hook and completion line for all 104 encounters, detailed in-context prompts for
-the first seven encounters, and the six tutorial beats. `getPlayScene` is a
+the first seven encounters, seven controls rehearsal steps, and the six story
+tutorial beats. `getPlayScene` is a
 presentation-only API: its goal follows the current first-act action while its
 win text remains behind successful completion. Spoken success text must never
 be displayed on an unverified attempt. Later chapters keep their authored

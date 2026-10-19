@@ -26,9 +26,11 @@ import {
   renderPlayWorld,
   mountPlayWorld,
   renderGearIcon,
-} from "./play-world.js";
+} from "./play-world.js?v=20261018-immersive";
 import { renderPlayActivity, mountPlayActivity } from "./play-tools.js";
-import { getPlayScene, tutorialBeats } from "./play-script.js";
+import { renderRanger } from "./play-art.js";
+import { getPlayScene, tutorialBeats, controlsTutorial } from "./play-script.js?v=20261018-immersive";
+import { hasSeenControls, saveControlsSeen, createGuidePractice, runGuidePractice, renderControlsGuide, renderGuidePractice } from "./play-guide.js";
 import {
   createPlayState,
   loadPlayState,
@@ -84,6 +86,11 @@ const restoredPlay = loadPlayState(backend, profile);
 let play = restoredPlay.state;
 let playRecoveryRequired = !!restoredPlay.error;
 let introIndex = 0;
+let controlsSeen = hasSeenControls(backend),
+  controlsStep = null,
+  controlsOrigin = null,
+  controlsPractice = createGuidePractice(),
+  speechExpanded = false;
 let gamePanel = null,
   chatter = null,
   worldCleanup = null,
@@ -151,6 +158,57 @@ function syncTutorial() {
     advancePlayTutorial(play, "fit-part");
   if (play.tutorialStage === 5 && session.done[1])
     advancePlayTutorial(play, "talk-nova");
+}
+function beginControlsGuide(renderNow = true) {
+  controlsStep = 0;
+  controlsOrigin = { ...play.position };
+  controlsPractice = createGuidePractice();
+  gamePanel = null;
+  speechExpanded = false;
+  if (renderNow) render();
+}
+function advanceControlsGuide(gate) {
+  if (controlsStep === null || controlsTutorial[controlsStep]?.gate !== gate) return false;
+  controlsStep++;
+  if (controlsStep >= controlsTutorial.length) finishControlsGuide();
+  return true;
+}
+function finishControlsGuide() {
+  controlsStep = null;
+  controlsSeen = true;
+  saveControlsSeen(backend);
+  play.tutorialStage = 6;
+  gamePanel = null;
+  clearTimeout(toast.timer);
+  $("#toast")?.classList.remove("visible");
+  chatter = {speaker:"PATCH", text:"Ranger ready. Antenna questionable. Adventure definitely on. Your goal is up there; anything interesting is worth a closer look."};
+  persistPlay();
+}
+function clearControlsGuide() {
+  controlsStep = null;
+  controlsOrigin = null;
+  controlsPractice = createGuidePractice();
+  gamePanel = null;
+}
+function closeGamePanel() {
+  const practiced = gamePanel === "practice" && controlsPractice.seen.includes("help") && controlsPractice.seen.includes("pwd");
+  gamePanel = null;
+  if (practiced) advanceControlsGuide("practice-console");
+  render();
+  $(".pw-scene")?.focus({preventScroll:true});
+}
+function openGameGadget() {
+  if (controlsStep !== null) gamePanel = "practice";
+  else {
+    gamePanel = "tools";
+    activeTool = stepNow()?.tool || "terminal";
+  }
+  render();
+  if (gamePanel === "practice") {
+    const input = $("#guide-practice-input");
+    input?.focus({preventScroll:true});
+    revealInput(input);
+  }
 }
 function playLine() {
   if (chatter) return chatter;
@@ -245,6 +303,7 @@ function render() {
   toolsCleanup?.();
   toolsCleanup = null;
   document.body.dataset.view = view;
+  document.body.dataset.guide = view === "mission" && controlsStep !== null ? "on" : "off";
   applySettings();
   if (view === "mission" && active) renderMission();
   else if (view === "chapter") renderChapter();
@@ -407,6 +466,7 @@ function openMission(id, practice = false) {
   introIndex=1;
   chatter=active.id==="c01-01"&&play.tutorialStage<6?null:getPlayScene(active,session).intro?.[0]||null;
   session.started = true;
+  if (!controlsSeen && controlsStep === null) beginControlsGuide(false);
   persist();
   render();
 }
@@ -429,7 +489,6 @@ function renderMission() {
     scene = getPlayScene(active, session);
   const done = session.done.filter(Boolean).length;
   $("#app").innerHTML =
-    header() +
     '<main id="main" class="play-page" tabindex="-1"><div class="play-topbar">' +
     button("← Valley map", "home", "", "play-map-button") +
     '<div><span class="eyebrow">CHAPTER ' +
@@ -445,7 +504,7 @@ function renderMission() {
         formatClock(session.elapsed) +
         "</time></span>"
       : "") +
-    '</div><div class="play-stage-wrap"><div id="game-world">' +
+    '</div><nav class="play-utility" aria-label="Game menu"><button type="button" data-action="settings" data-testid="settings" aria-label="Game settings" title="Game settings">⚙</button><button type="button" data-action="tour" aria-label="How to play" title="How to play">?</button><button type="button" data-game-action="fullscreen" aria-label="Toggle fullscreen" title="Toggle fullscreen">⛶</button></nav><div class="play-stage-wrap"><div id="game-world">' +
     renderPlayWorld(active, session, play, chapterOf(active)) +
     '</div><div class="play-quest"><span>' +
     (active.phase === "boss" ? "BOSS ENCOUNTER" : "ON THE TRAIL") +
@@ -468,12 +527,11 @@ function renderMission() {
           "</span>",
       )
       .join("") +
-    '</div></div><div class="play-speech"><div class="play-speech-copy" id="patch-response">' +
+    '</div></div><div class="play-speech" data-expanded="' + speechExpanded + '"><button type="button" class="play-speech-toggle" data-game-action="speech-expand" aria-expanded="' + speechExpanded + '" aria-label="' + (speechExpanded ? "Collapse dialogue" : "Expand dialogue and hints") + '">⌃</button><div class="play-speech-copy" id="patch-response">' +
     renderSpeech() +
     '</div><div class="play-speech-actions">' +
     button("Say that again", "game-banter", "", "small-button") +
     '<button type="button" class="button small-button" data-game-action="hint" data-testid="ask-patch">A tiny nudge?</button>' +
-    (active.id === "c01-01" && play.tutorialStage < 6 ? '<button type="button" class="button small-button" data-game-action="skip-guide">Skip guide</button>' : '') +
     '</div><small class="play-tutorial-count">' +
     (active.id === "c01-01" && play.tutorialStage < 6
       ? "Getting our feet dirty · " + (play.tutorialStage + 1) + "/6"
@@ -486,6 +544,7 @@ function renderMission() {
     (session.completed ? "Next stop" : "Talk to Nova") +
     "</button></nav>" +
     renderGamePanel(step, index) +
+    renderControlsGuide(controlsStep, {returning:active.id !== "c01-01" || session.completed || session.done.some(Boolean), practicing:gamePanel === "practice"}) +
     "</main>";
   worldCleanup = mountPlayWorld($("#game-world"), {
     motion: document.body.dataset.motion !== "off",
@@ -493,6 +552,10 @@ function renderMission() {
       const before = play.tutorialStage;
       movePlayPlayer(play, position.x, position.y);
       persistPlay();
+      if (controlsStep !== null && controlsTutorial[controlsStep]?.gate === "move" && controlsOrigin && Math.hypot(position.x-controlsOrigin.x,position.y-controlsOrigin.y) >= 5) {
+        advanceControlsGuide("move");
+        queueMicrotask(render);
+      }
       if (before !== play.tutorialStage) {
         chatter = null;
         updateSpeech();
@@ -544,12 +607,22 @@ function renderMission() {
       )
         $('[data-testid="close-game-panel"]')?.focus({ preventScroll: true });
     });
+  if (controlsStep !== null && gamePanel !== "practice") {
+    const target = $(controlsTutorial[controlsStep]?.target);
+    target?.classList.add("onboarding-target");
+    if (!gamePanel) queueMicrotask(() => {
+      const beat = controlsTutorial[controlsStep];
+      if (beat?.gate === "continue" || beat?.gate === "start-adventure") $('[data-testid="guide-next"]')?.focus({preventScroll:true});
+      else $(".pw-scene")?.focus({preventScroll:true});
+    });
+  }
 }
 function renderGamePanel(step, index) {
   if (!gamePanel) return "";
+  if (gamePanel === "practice") return renderGuidePractice(controlsPractice);
   if (gamePanel === "pack")
     return (
-      '<aside id="game-panel" class="play-panel pack-panel" role="dialog" aria-modal="true" aria-label="Your backpack"><header><div><span class="eyebrow">POCKET-SIZED NONSENSE</span><h2>Your backpack</h2></div><button data-game-action="close-panel" data-testid="close-game-panel" aria-label="Close backpack">×</button></header><p>Try a new look. Patch insists the antenna improves biscuit reception.</p><div class="pack-grid">' +
+      '<aside id="game-panel" class="play-panel pack-panel" role="dialog" aria-modal="true" aria-label="Your backpack"><header><div><span class="eyebrow">THE RANGER’S OUTFITTER</span><h2>Your backpack</h2></div><button data-game-action="close-panel" data-testid="close-game-panel" aria-label="Close backpack">×</button></header><div class="pack-character-preview"><span aria-hidden="true">' + renderRanger(play.equipped.hat) + '</span><div><span class="eyebrow">YOUR RANGER</span><h3>' + esc(catalog.find(item => item.id === play.equipped.hat)?.label || "Ready for the trail") + '</h3><p>Try a new look. Patch insists the antenna improves biscuit reception.</p></div></div><div class="pack-grid">' +
       catalog
         .map((item) => {
           const owned = play.bag.includes(item.id),
@@ -653,6 +726,11 @@ function renderGamePanel(step, index) {
 }
 function worldInteract(id) {
   if (busy) return;
+  if (controlsStep !== null && (id.startsWith("artifact:") || ["nova","beacon","exit"].includes(id))) {
+    toast("We’ll get to the mission in a moment. " + (controlsTutorial[controlsStep]?.action || "Finish the controls rehearsal, or skip it to explore."));
+    return;
+  }
+  if (controlsStep !== null && ["terminal","objective"].includes(id)) return openGameGadget();
   if (id === "map" || id === "exit") {
     if (id === "exit" && session.completed)
       return openMission(
@@ -677,6 +755,7 @@ function worldInteract(id) {
   }
   if (id === "patch") {
     const result = interactPlay(play, active, "patch");
+    advanceControlsGuide("meet-patch");
     chatter = {
       speaker: "PATCH",
       text:
@@ -691,6 +770,7 @@ function worldInteract(id) {
   }
   if (id === "cache") {
     const result = interactPlay(play, active, "cache");
+    if (result.ok) advanceControlsGuide("collect-cache");
     chatter = {
       speaker: "PATCH",
       text:
@@ -747,6 +827,7 @@ function worldInteract(id) {
     return;
   }
   if (id === "terminal" || id === "objective" || id.startsWith("artifact:")) {
+    if (controlsStep !== null) return openGameGadget();
     gamePanel = "tools";
     activeTool = id === "terminal" ? "terminal" : stepNow()?.tool || "terminal";
     chatter = null;
@@ -1386,18 +1467,9 @@ function showTour() {
   closeDialog();
   if (!active) {
     openMission(profile.currentMission || missions[0].id);
-    return;
   }
-  gamePanel = null;
-  chatter = null;
-  if (active.id === "c01-01" && !session.completed) play.tutorialStage = 0;
-  else
-    chatter = {
-      speaker: "PATCH",
-      text: "Walk with the arrows or tap the ground. Tap something interesting to try it. Your backpack has the excellent hats; my pocket has the emergency explanations.",
-    };
-  persistPlay();
-  render();
+  view = "mission";
+  beginControlsGuide();
 }
 function showReflection() {
   quizFeedback = null;
@@ -1806,13 +1878,43 @@ function handleActivity(result) {
   if (result.completedStep !== undefined) showStepBeat(result.completedStep);
 }
 document.addEventListener("click", (event) => {
+  const control = event.target.closest("[data-guide-action]");
+  if (!control || control.disabled || busy) return;
+  const action = control.dataset.guideAction;
+  if (action === "skip") {
+    finishControlsGuide();
+    render();
+    $(".pw-scene")?.focus({preventScroll:true});
+  } else if (action === "next") {
+    const gate = controlsTutorial[controlsStep]?.gate;
+    if (gate === "continue" || gate === "start-adventure") {
+      advanceControlsGuide(gate);
+      render();
+    }
+  } else if (action === "pack") {
+    gamePanel = "pack";
+    render();
+  } else if (action === "practice") openGameGadget();
+  else if (action === "practice-done" && controlsPractice.seen.includes("help") && controlsPractice.seen.includes("pwd")) closeGamePanel();
+});
+document.addEventListener("click", (event) => {
   const control = event.target.closest("[data-game-action]");
   if (!control || control.disabled || busy) return;
   const action = control.dataset.gameAction;
   if (action === "close-panel") {
-    gamePanel = null;
-    render();
-    $(".pw-scene")?.focus({ preventScroll: true });
+    closeGamePanel();
+  }
+  if (action === "speech-expand") {
+    speechExpanded = !speechExpanded;
+    const speech = $(".play-speech");
+    speech.dataset.expanded = String(speechExpanded);
+    control.setAttribute("aria-expanded", String(speechExpanded));
+    control.setAttribute("aria-label", speechExpanded ? "Collapse dialogue" : "Expand dialogue and hints");
+  }
+  if (action === "fullscreen") {
+    if (!document.fullscreenEnabled) return toast("The game already fills this window. Use your browser’s full-screen control to hide its toolbar.");
+    const change = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    change.catch(() => toast("Your browser keeps the game in its full-window view. You can hide its toolbar from the browser menu."));
   }
   if (action === "pack") {
     gamePanel = "pack";
@@ -1820,6 +1922,7 @@ document.addEventListener("click", (event) => {
   }
   if (action === "equip") {
     const result = equipPlayItem(play, control.dataset.item);
+    if (result.ok && catalog.find(item => item.id === control.dataset.item)?.slot === "hat" && advanceControlsGuide("equip-hat")) gamePanel = null;
     chatter = {
       speaker: "PATCH",
       text:
@@ -1830,9 +1933,7 @@ document.addEventListener("click", (event) => {
     render();
   }
   if (action === "gadget") {
-    gamePanel = "tools";
-    activeTool = stepNow()?.tool || "terminal";
-    render();
+    openGameGadget();
   }
   if (action === "nova") worldInteract(session.completed ? "exit" : "nova");
   if (action === "skip-guide") {
@@ -1917,7 +2018,7 @@ document.addEventListener("click", async (event) => {
     else renderStory();
   }
   if (action === "story-skip") endStory();
-  if (action === "how-to") showTour();
+  if (action === "how-to" || action === "tour") showTour();
   if (action === "tour-next") showTour();
   if (action === "tour-end") endTour();
   if (action === "tool") {
@@ -1998,6 +2099,7 @@ document.addEventListener("click", async (event) => {
     profile = importFile.pending;
     play = importFile.pendingPlay;
     playRecoveryRequired = false;
+    clearControlsGuide();
     storage.write(profile);
     persistPlay();
     active = null;
@@ -2021,6 +2123,7 @@ document.addEventListener("click", async (event) => {
     profile = storage.reset();
     play = createPlayState(profile);
     playRecoveryRequired = false;
+    clearControlsGuide();
     persistPlay();
     active = null;
     session = null;
@@ -2040,6 +2143,23 @@ document.addEventListener("click", async (event) => {
   }
 });
 document.addEventListener("submit", (event) => {
+  if (event.target.id === "guide-practice-form") {
+    event.preventDefault();
+    if (busy) return;
+    const raw = $("#guide-practice-input").value;
+    busy = true;
+    runGuidePractice(controlsPractice, raw).then(() => {
+      busy = false;
+      render();
+      $("#guide-practice-input")?.focus({preventScroll:true});
+      const output = $("#guide-practice-output");
+      if (output) output.scrollTop = output.scrollHeight;
+      revealInput($("#guide-practice-input"));
+    }).catch(() => {
+      busy = false;
+      toast("The practice gadget needs another try. Your mission is safe.");
+    });
+  }
   if (event.target.id === "terminal-form") {
     event.preventDefault();
     historyIndex = -1;
@@ -2047,12 +2167,19 @@ document.addEventListener("submit", (event) => {
   }
 });
 document.addEventListener("keydown", (event) => {
+  const pausedGuide = !dialog.open && !gamePanel && $('.play-onboarding[data-world-blocked="true"]');
+  if (pausedGuide && event.key === "Tab") {
+    const buttons = $$("button:not(:disabled)", pausedGuide);
+    const first = buttons[0], last = buttons.at(-1);
+    if (!pausedGuide.contains(document.activeElement) || (event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first)?.focus({preventScroll:true});
+    }
+  }
   if (gamePanel && !dialog.open) {
     if (event.key === "Escape") {
       event.preventDefault();
-      gamePanel = null;
-      render();
-      $(".pw-scene")?.focus({ preventScroll: true });
+      closeGamePanel();
       return;
     }
     if (event.key === "Tab") {
@@ -2070,6 +2197,10 @@ document.addEventListener("keydown", (event) => {
         (event.shiftKey ? last : first)?.focus();
       }
     }
+  }
+  if (event.target.id === "guide-practice-input" && ["ArrowUp","ArrowDown"].includes(event.key)) {
+    event.preventDefault();
+    event.target.value = event.key === "ArrowUp" ? controlsPractice.shell.history.at(-1) || "" : "";
   }
   if (event.target.id === "terminal-input") {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -2153,7 +2284,7 @@ function revealActiveEditor() {
   const editor = document.activeElement;
   if (
     editor?.matches(
-      "#terminal-input,[data-report-field],#script-editor,[data-repair-text]",
+      "#terminal-input,#guide-practice-input,[data-report-field],#script-editor,[data-repair-text]",
     )
   )
     revealInput(editor);
@@ -2175,7 +2306,8 @@ setInterval(() => {
     !session.completed &&
     profile.settings.timer &&
     !document.hidden &&
-    !dialog.open
+    !dialog.open &&
+    controlsStep === null
   ) {
     session.elapsed = (session.elapsed || 0) + delta;
     const label = $("#practice-clock");

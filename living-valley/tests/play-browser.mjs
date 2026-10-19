@@ -73,6 +73,7 @@ async function screenshot(label, width = 1440, height = 1000) {
 async function stories() {
   for (let remaining = 50; remaining > 0; remaining--) {
     if (await ui('story-next').isVisible()) await ui('story-next').click();
+    else if (await ui('guide-skip').isVisible()) await ui('guide-skip').click();
     else return;
   }
   assert.fail('Story transmissions must give control back to the player.');
@@ -203,12 +204,18 @@ try {
   const start = await avatar();
   await page.locator('.pw-scene').focus();
   await page.keyboard.down('d');
-  try {await waitTutorial(1);} finally {await page.keyboard.up('d');}
+  try {await page.waitForFunction(origin => {
+    const node = document.querySelector('.play-avatar');
+    return Math.hypot(Number(node.dataset.x) - origin.x, Number(node.dataset.y) - origin.y) >= 5;
+  }, start, {timeout: 10000});} finally {await page.keyboard.up('d');}
   const moved = await avatar();
   assert.ok(Math.hypot(moved.x - start.x, moved.y - start.y) >= 5, 'The first tutorial move requires actual displacement.');
   assert.equal(await isDone(0), false, 'Walking alone gives no learning credit.');
-  await interact('patch');await waitTutorial(2);
-  await interact('cache');await waitTutorial(3);
+  const priorSpeech = await page.locator('.play-speech-copy').innerText();
+  await interact('patch');
+  await page.waitForFunction(before => document.querySelector('.play-speech-copy')?.textContent.trim() !== before.trim(), priorSpeech, {timeout: 10000});
+  await interact('cache');
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('terminal-trails-play-v1') || 'null')?.collected.includes('c01-01:cache'), null, {timeout: 10000});
   const found = await playState();
   assert.equal(found.coins, 3);
   assert.ok(found.bag.includes('antenna-cap') && found.bag.includes('emergency-biscuit'));
@@ -223,7 +230,7 @@ try {
   assert.notEqual(await page.locator('.play-avatar svg').innerHTML(), beforeHat, 'Equipped gear visibly changes the ranger in the world.');
   await closeGadget();
   await screenshot('antenna-equipped');
-  checks.push('movement', 'action-led tutorial', 'cache no farming', 'visible equipped gear');
+  checks.push('actual movement', 'cache no farming', 'visible equipped gear');
 
   // Repeated native dialog closes must not leave old world/tool listeners behind.
   for (let count = 0; count < 2; count++) {
@@ -280,7 +287,7 @@ try {
   }, null, {timeout: 5000});
   checks.push('verified physical repair consequence');
   await solveActivity(first, 1, {negative: true});await waitTutorial(6);
-  checks.push('activity:classify', 'keyboard placement', 'native drag placement', 'tutorial verified actions');
+  checks.push('activity:classify', 'keyboard placement', 'native drag placement', 'verified assembly and Nova actions');
   await closeGadget();
   await finishEncounter(first);
   const firstSave = await exportSave('first-public-completion');
@@ -349,16 +356,18 @@ try {
   await ui('start-journey').click();await stories();
   for (const [width, height] of [[320, 900], [390, 900], [844, 390], [1440, 1000]]) await screenshot('adventure-responsive', width, height);
   await page.setViewportSize({width: 390, height: 900});
-  const pad = page.locator('[data-world-move="right"]');
+  const pad = page.locator('[data-world-stick]');
   await pad.scrollIntoViewIfNeeded();
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const padBox = await pad.boundingBox(), padStart = await avatar();
   assert.ok(padBox && padBox.width >= 44 && padBox.height >= 44, 'Phone walking controls have usable touch targets.');
   assert.equal(await pad.evaluate(node => {
     const box = node.getBoundingClientRect();
-    return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.closest('[data-world-move]') === node;
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return hit === node || node.contains(hit);
   }), true, 'The fixed adventure belt does not cover the walking control.');
   await page.mouse.move(padBox.x + padBox.width / 2, padBox.y + padBox.height / 2);await page.mouse.down();
+  await page.mouse.move(padBox.x + padBox.width * .85, padBox.y + padBox.height / 2);
   try {await page.waitForFunction(x => Number(document.querySelector('.play-avatar')?.dataset.x) >= x + 2, padStart.x, {timeout: 5000});}
   finally {await page.mouse.up();}
   checks.push('phone walking control', 'editor movement isolation');
