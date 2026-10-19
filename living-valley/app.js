@@ -26,10 +26,10 @@ import {
   renderPlayWorld,
   mountPlayWorld,
   renderGearIcon,
-} from "./play-world.js?v=20261018-immersive";
+} from "./play-world.js?v=20261019-alpine";
 import { renderPlayActivity, mountPlayActivity } from "./play-tools.js";
 import { renderRanger } from "./play-art.js";
-import { getPlayScene, tutorialBeats, controlsTutorial } from "./play-script.js?v=20261018-immersive";
+import { getPlayScene, tutorialBeats, controlsTutorial } from "./play-script.js?v=20261019-alpine";
 import { hasSeenControls, saveControlsSeen, createGuidePractice, runGuidePractice, renderControlsGuide, renderGuidePractice } from "./play-guide.js";
 import {
   createPlayState,
@@ -489,7 +489,7 @@ function renderMission() {
     scene = getPlayScene(active, session);
   const done = session.done.filter(Boolean).length;
   $("#app").innerHTML =
-    '<main id="main" class="play-page" tabindex="-1"><div class="play-topbar">' +
+    '<main id="main" class="play-page" data-art-direction="' + ((active.scene || chapterOf(active)?.scene) === "welcome" ? "alpine" : "classic") + '" tabindex="-1"><div class="play-topbar">' +
     button("← Valley map", "home", "", "play-map-button") +
     '<div><span class="eyebrow">CHAPTER ' +
     active.chapter +
