@@ -9,6 +9,26 @@ concurrency:
   group: v5-checks-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  configure:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+    steps:
+      - name: Check and configure the Pages source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          current_type=$(gh api "repos/$GH_REPO/pages" --jq .build_type)
+          if [ "$current_type" = "workflow" ]; then exit 0; fi
+          printf '%s\n' '{"build_type":"workflow"}' > "$RUNNER_TEMP/pages-source.json"
+          if ! gh api --method PUT "repos/$GH_REPO/pages" --input "$RUNNER_TEMP/pages-source.json" --silent 2> "$RUNNER_TEMP/pages-error.txt"; then
+            pages_error_text=$(cat "$RUNNER_TEMP/pages-error.txt")
+            printf '::error title=Pages source configuration::%s\n' "$pages_error_text"
+            exit 1
+          fi
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -27,7 +47,7 @@ jobs:
           name: v5-browser-results
           path: test-results/
   stage:
-    needs: verify
+    needs: [verify, configure]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -38,13 +58,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Make tested Actions deployments the Pages source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          printf '%s\n' '{"build_type":"workflow","source":{"branch":"main","path":"/"}}' > "$RUNNER_TEMP/pages-source.json"
-          gh api --method PUT "repos/$GH_REPO/pages" --input "$RUNNER_TEMP/pages-source.json" --silent
       - uses: actions/configure-pages@v5
       - run: npm run build:site
       - uses: actions/upload-pages-artifact@v3
