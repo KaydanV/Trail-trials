@@ -7,7 +7,8 @@ import { getHint } from '../src/coach.js';
 import { createPracticeMission } from '../src/practice.js';
 
 // Drive the public UI with curriculum solutions. Never edit saves or application state.
-const baseURL = process.env.TRAILS_URL || 'http://127.0.0.1:4173';
+const origin = (process.env.TRAILS_URL || 'http://127.0.0.1:4173').replace(/\/$/, '');
+const baseURL = process.env.LEGACY_URL || origin + '/classic.html';
 const results = new URL('../test-results/', import.meta.url);
 await mkdir(results, { recursive: true });
 const browser = await chromium.launch({
@@ -24,11 +25,11 @@ const fontAssets = new Set();
 page.on('pageerror', error => pageErrors.push(error.message));
 page.on('dialog', async dialog => { unexpectedDialogs.push(dialog.message()); await dialog.dismiss(); });
 page.on('response', response => {
-  if (response.url().startsWith(baseURL) && response.status() >= 400) resourceErrors.push(`${response.status()} ${response.url()}`);
+  if (response.url().startsWith(new URL(baseURL).origin) && response.status() >= 400) resourceErrors.push(`${response.status()} ${response.url()}`);
   if (response.request().resourceType() === 'font' && response.status() === 200) fontAssets.add(response.url());
 });
 page.on('requestfailed', request => {
-  if (request.url().startsWith(baseURL)) resourceErrors.push(`${request.failure()?.errorText} ${request.url()}`);
+  if (request.url().startsWith(new URL(baseURL).origin)) resourceErrors.push(`${request.failure()?.errorText} ${request.url()}`);
 });
 const ui = id => page.getByTestId(id);
 const reflection = 'Follow the evidence before making the call. <img src=x onerror=alert(1)>';
@@ -607,7 +608,7 @@ try {
   assert.deepEqual(resourceErrors, [], 'Initial app scripts, styles, and artwork load successfully');
   await page.evaluate(() => document.fonts.ready);
   assert.ok(fontAssets.size >= 2, 'The upgraded design loads its display and reading fonts');
-  assert.ok([...fontAssets].every(url => url.startsWith(baseURL)), 'The design fonts load from the local application');
+  assert.ok([...fontAssets].every(url => url.startsWith(new URL(baseURL).origin)), 'The design fonts load from the local application');
   const fonts = await page.evaluate(() => [...document.fonts].map(face => ({ family: face.family, status: face.status })));
   assert.ok(new Set(fonts.filter(face => face.status === 'loaded').map(face => face.family)).size >= 2, 'The local fonts decode successfully and replace fallback typography');
   assert.ok(fonts.every(face => face.status !== 'error'), 'No local font fails decoding');

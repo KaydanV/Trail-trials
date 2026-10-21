@@ -15,6 +15,7 @@ for (const file of ['failure.png', 'failure.txt', 'report.json']) await rm(new U
 const browser = await chromium.launch({headless: true, executablePath: process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox']});
 const context = await browser.newContext({viewport: {width: 1440, height: 900}});
 let page = await context.newPage();
+await page.clock.install();
 const checks = [], errors = [], resources = [], layouts = [];
 function observe(target) {
   target.on('pageerror', error => errors.push(error.message));
@@ -25,7 +26,8 @@ function observe(target) {
 observe(page);
 const ui = id => page.getByTestId(id);
 const action = name => page.locator('[data-action="' + name + '"]').filter({visible: true}).first();
-async function frames() {await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));}
+let clockPaused = false;
+async function frames() {if(clockPaused){await page.clock.runFor(40);return;}await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));}
 async function learning() {
   return page.evaluate(() => {
     const value = JSON.parse(localStorage.getItem('terminal-trails-living-valley-v1') || 'null');
@@ -170,7 +172,8 @@ async function completeGuide({replay = false, phone = false} = {}) {
 }
 
 try {
-  await page.goto(baseURL, {waitUntil: 'networkidle'});
+  await page.goto(origin, {waitUntil: 'networkidle'});
+  assert.equal(new URL(page.url()).pathname, new URL(baseURL).pathname, 'The public entry point leads to Version 5.');
   await ui('start-journey').click();
   while (await ui('story-next').isVisible()) await ui('story-next').click();
   await guideStep(['welcome']);
@@ -191,34 +194,44 @@ try {
   assert.equal(await page.locator('.play-onboarding').count(), 0, 'The observed per-device guide choice persists after reload.');
   checks.push('replay and skip independent of learning', 'per-device onboarding persists');
 
-  // The rendering loop must produce many small updates, not jump on key repeat.
+  // Use one controlled browser clock for both directions: real keyboard events
+  // still drive the real renderer, without comparing unrelated CI scheduling stalls.
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 100);
+  clockPaused = true;
   const original = await avatar();
   await page.locator('.pw-scene').focus();
   await page.keyboard.down('d');
-  const samples = await page.evaluate(() => new Promise(resolve => {
-    const values = [], start = performance.now();
-    function sample(time) {
+  await page.evaluate(() => {
+    window.walkSamples = [];
+    const sample = () => {
       const node = document.querySelector('.play-avatar');
-      values.push({time, x: Number(node.dataset.x), y: Number(node.dataset.y)});
-      if (time - start >= 350) resolve(values);else requestAnimationFrame(sample);
-    }
+      window.walkSamples.push(Number(node.dataset.x));
+      if (window.walkSamples.length < 30) requestAnimationFrame(sample);
+    };
     requestAnimationFrame(sample);
-  }));
-  await page.keyboard.up('d');
-  assert.ok(new Set(samples.map(sample => sample.x)).size >= 5, 'Held walking advances through animation frames.');
+  });
+  await page.clock.runFor(400);
+  const samples = await page.evaluate(() => window.walkSamples);
   const horizontalEnd = await avatar();
+  await page.keyboard.up('d');
+  await page.clock.runFor(600);
+  assert.ok(new Set(samples).size >= 5, 'Held walking advances through animation frames.');
   assert.ok(horizontalEnd.x > original.x + 1, 'A held direction causes real movement.');
   await assertWalkingSettles('Releasing the key stops the ranger.');
   const sceneSize = await page.locator('.pw-scene').boundingBox();
-  const projection = await page.locator('.pw-world').evaluate(node => JSON.parse(node.dataset.walkProjection || '{"scale":1,"offset":0}'));
+  const projection = await page.locator('.pw-world').evaluate(node => JSON.parse(node.dataset.walkProjection));
   const diagonalStart = await avatar();
-  await page.keyboard.down('w');await page.keyboard.down('d');await page.waitForTimeout(350);
-  await page.keyboard.up('w');await page.keyboard.up('d');
+  await page.keyboard.down('w');await page.keyboard.down('d');
+  await page.clock.runFor(400);
   const diagonalEnd = await avatar();
-  const horizontalDistance = Math.hypot((horizontalEnd.x - original.x) * sceneSize.width / 100, (horizontalEnd.y - original.y) * sceneSize.height * projection.scale / 100);
-  const diagonalDistance = Math.hypot((diagonalEnd.x - diagonalStart.x) * sceneSize.width / 100, (diagonalEnd.y - diagonalStart.y) * sceneSize.height * projection.scale / 100);
-  assert.ok(diagonalDistance <= horizontalDistance * 1.3 && diagonalDistance >= horizontalDistance * .72, 'Diagonal movement keeps the same pixel pace instead of a speed boost: ' + JSON.stringify({horizontalDistance, diagonalDistance}));
+  await page.keyboard.up('w');await page.keyboard.up('d');
+  await page.clock.runFor(600);
+  const pixels = (a,b) => Math.hypot((b.x-a.x)*sceneSize.width/100,(b.y-a.y)*sceneSize.height*projection.scale/100);
+  const horizontalDistance = pixels(original,horizontalEnd), diagonalDistance = pixels(diagonalStart,diagonalEnd);
+  assert.ok(diagonalDistance <= horizontalDistance * 1.12 && diagonalDistance >= horizontalDistance * .88, 'Equal elapsed simulation time preserves diagonal pace: ' + JSON.stringify({horizontalDistance,diagonalDistance}));
   await assertWalkingSettles('Releasing both diagonal directions stops the ranger.');
+  await page.clock.resume();
+  clockPaused = false;
   checks.push('frame-based held walking', 'key release stops', 'normalized diagonal walking');
 
   await ui('pack').click();

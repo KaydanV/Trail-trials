@@ -1,5 +1,6 @@
 /** A small, local adventure stage. Walking never awards lesson progress. */
-import { getPlayScene } from './play-script.js?v=20261019-alpine2';
+import { getPlayScene } from './play-script.js?v=v5.0.0-20261021';
+import { paintedObstacles } from './scene-layout.js';
 import { WALK_BOUNDS, walkDistance, isWalkable, walkablePoint, planWalk, moveOnTrail, integrateWalk } from './play-controller.js';
 import { renderRanger, renderGearIcon, renderNova, renderPatch } from './play-art.js';
 export { renderGearIcon };
@@ -101,7 +102,7 @@ export function renderPlayWorld(mission = {}, session = {}, game = {}, chapter =
     const i = current.activity.items.findIndex(candidate => candidate.id === item.id);
     const count = current.activity.items.length;
     const kind = mission.id === 'c01-02' && ['linux', 'windows'].includes(item.id) ? 'kit-screen' : mission.id === 'c01-01' && item.id === 'screen' ? 'kit-screen' : mission.id === 'c01-01' && item.id === 'linux' ? 'kit-linux' : mission.id === 'c01-01' && item.id === 'viewer' ? 'kit-viewer' : 'artifact';
-    return object('artifact:' + item.id, kind, item.label, count <= 4 ? 29 + i * 15 : 24 + i * 13, 83 + (i % 2 ? 2 : -2), 'pw-clue-object');
+    return object('artifact:' + item.id, kind, item.label, count <= 4 ? 29 + i * 15 : 24 + i * 13, 83 + (i % 2 ? 2 : -2), 'pw-clue-object' + (session.activity?.[steps.indexOf(current)]?.inspected?.includes(item.id) ? ' is-observed' : ''));
   }).join('');
   const starter = mission.id === 'c01-01';
   const threat = boss ? `<div class="pw-boss-obstruction" data-subdued="${done === steps.length}" data-defeated="${complete}" aria-hidden="true"><svg viewBox="0 0 260 250"><path class="pw-threat-smoke" fill="#342b51" d="m130 0 34 40 39-10-3 48 53 27-34 42 27 48-59 8-25 47-39-34-54 25-5-52-58-26 33-40-22-59 59-7z"/>${bossBody(mission.chapter)}${steps.map((_,i)=>`<path class="pw-threat-lock" data-cleared="${session.done?.[i]===true}" fill="none" stroke="#a7a3b1" stroke-width="9" stroke-linecap="round" d="M${50+i*27} 185v${i%2?23:-25}"/>`).join('')}<path class="pw-threat-crack" fill="none" stroke="#f8ca82" stroke-width="3" d="${done ? 'm127 45-12 35 20 28-16 32 11 32' : ''}"/></svg><span>${complete ? 'CLEARED' : done === steps.length ? 'Ready for the final move' : e(bossName)}</span></div>` : '';
@@ -183,7 +184,9 @@ export function mountPlayWorld(root, { onInteract = () => {}, onPosition = () =>
     pace = Math.max(145, Math.min(340, stageBounds.width * 0.24)) / stageBounds.width * 100;
     reach = Math.max(43, Math.min(90, stageBounds.width * 0.073)) / stageBounds.width * 100;
     obstacles = [];
-    if (scenery) {
+    if (world.closest('[data-art-direction="alpine"]')) {
+      obstacles = paintedObstacles(world.dataset.playScene, stageBounds.width, stageBounds.height, {scale:yScale, offset:yOffset});
+    } else if (scenery) {
       scenery.style.transform = 'none';
       const original = scenery.getBoundingClientRect();
       const lift = yOffset / 100 * stageBounds.height + (yScale - 1) * (original.top - stageBounds.top);
@@ -414,10 +417,17 @@ export function mountPlayWorld(root, { onInteract = () => {}, onPosition = () =>
     player.style.setProperty('--pw-speed', String(moving ? speedRatio : 0));
     player.style.setProperty('--pw-step-phase', String(phase));
     player.style.setProperty('--pw-stride', String(moving && !reduced ? Math.sin(phase) : 0));
-    const follow = walkablePoint({
-      x: clamp(position.x + (player.dataset.facingHorizontal === 'left' ? 7 : -7), 5, 95),
+    const companionGap = Math.max(7, 56 / stageBounds.width * 100);
+    const desiredFollow = {
+      x: clamp(position.x + (player.dataset.facingHorizontal === 'left' ? companionGap : -companionGap), 5, 95),
       y: clamp(position.y + 2.7, 45, 88),
-    }, obstacles, WALK_BOUNDS, aspect) || position;
+    };
+    const guide = world.querySelector('[data-world-object="nova"]');
+    if (guide && distance(desiredFollow, objectPosition(guide)) < companionGap) {
+      // Patch stays beside the player without covering the guide's touch target.
+      desiredFollow.x = clamp(position.x + (position.x >= Number(guide.dataset.worldX) ? companionGap : -companionGap), 5, 95);
+    }
+    const follow = walkablePoint(desiredFollow, obstacles, WALK_BOUNDS, aspect) || position;
     const patchDistance = distance(patchPosition, follow);
     if (patchDistance > 0.1) {
       const waypoint = planWalk(patchPosition, follow, obstacles, WALK_BOUNDS, aspect)[0] || follow;

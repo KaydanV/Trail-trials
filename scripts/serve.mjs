@@ -19,4 +19,4 @@ const server=createServer(async(req,res)=>{
   } catch {res.writeHead(404);res.end('Not found');}
 });
 const port=Number(process.env.PORT||4173);
-server.listen(port,'0.0.0.0',()=>console.log(`Terminal Trails development server on port ${port}`));
+server.listen(port,'0.0.0.0',()=>console.log(`Terminal Trails development server on port ${server.address().port}`));

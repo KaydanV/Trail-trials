@@ -1,12 +1,17 @@
-name: Foundation checks
+name: Version 5 release checks
 on:
   push:
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: v5-checks-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  foundation:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -14,27 +19,59 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - run: npm run check
-      - run: npm run check:valley
-      - run: npm test
-      - run: npm run test:valley
       - run: npx playwright install --with-deps chromium
-      - name: Complete the foundation in a browser
-        run: |
-          npm start > /tmp/terminal-trails-server.log 2>&1 &
-          server_pid=$!
-          trap 'kill "$server_pid"' EXIT
-          for attempt in {1..20}; do
-            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then break; fi
-            sleep 1
-          done
-          npm run test:browser
-          npm run test:mobile
-          npm run test:valley:browser
-          npm run test:valley:play
-          npm run test:valley:immersive
+      - run: npm run verify:v5
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: foundation-browser-results
+          name: v5-browser-results
           path: test-results/
+  stage:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Make tested Actions deployments the Pages source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          printf '%s\n' '{"build_type":"workflow","source":{"branch":"main","path":"/"}}' > "$RUNNER_TEMP/pages-source.json"
+          gh api --method PUT "repos/$GH_REPO/pages" --input "$RUNNER_TEMP/pages-source.json" --silent
+      - uses: actions/configure-pages@v5
+      - run: npm run build:site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  publish:
+    needs: stage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Deploy the tested artifact
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Verify the live release commit
+        env:
+          PAGES_URL: ${{ steps.deployment.outputs.page_url }}
+        run: node scripts/check-published.mjs "$PAGES_URL" "$GITHUB_SHA"

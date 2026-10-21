@@ -277,8 +277,8 @@ test('wrong actions and unsupported claims cannot clear authored investigation c
   assert.equal(readCases > 20, true, 'Printed claims do not substitute for inspecting the evidence');
 });
 
-test('the separate adventure references existing local assets and preserves the original game entry point', async () => {
-  for (const relative of ['../index.html', '../app.js', '../styles.css', '../world.js', '../world.css', '../../index.html', '../../assets/expedition.webp']) {
+test('the separate adventure references existing local assets and preserves the original game at its legacy entry point', async () => {
+  for (const relative of ['../index.html', '../app.js', '../styles.css', '../world.js', '../world.css', '../../classic.html', '../../assets/expedition.webp']) {
     await access(new URL(relative, import.meta.url));
   }
   for (const relative of ['../index.html', '../styles.css', '../world.css', '../world.js']) {

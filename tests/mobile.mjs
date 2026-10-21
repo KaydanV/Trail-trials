@@ -5,7 +5,8 @@ import { chromium } from 'playwright';
 
 // Complete the same first mission through touch controls at narrow, landscape,
 // and tablet sizes. Saves and objective credit change only through the public UI.
-const baseURL = process.env.TRAILS_URL || 'http://127.0.0.1:4173';
+const origin = (process.env.TRAILS_URL || 'http://127.0.0.1:4173').replace(/\/$/, '');
+const baseURL = process.env.LEGACY_URL || origin + '/classic.html';
 const results = new URL('../test-results/mobile/', import.meta.url);
 await mkdir(results, { recursive: true });
 const browser = await chromium.launch({
@@ -28,10 +29,10 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     page.on('dialog', async dialog => { unexpectedDialogs.push(dialog.message()); await dialog.dismiss(); });
     page.on('response', response => {
-      if (response.url().startsWith(baseURL) && response.status() >= 400) resourceErrors.push(`${response.status()} ${response.url()}`);
+      if (response.url().startsWith(new URL(baseURL).origin) && response.status() >= 400) resourceErrors.push(`${response.status()} ${response.url()}`);
     });
     page.on('requestfailed', request => {
-      if (request.url().startsWith(baseURL)) resourceErrors.push(`${request.failure()?.errorText} ${request.url()}`);
+      if (request.url().startsWith(new URL(baseURL).origin)) resourceErrors.push(`${request.failure()?.errorText} ${request.url()}`);
     });
     const ui = id => page.getByTestId(id);
     const tap = async id => { await ui(id).waitFor({ state: 'visible' }); await ui(id).tap(); };

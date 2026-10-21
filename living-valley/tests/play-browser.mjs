@@ -96,6 +96,10 @@ async function solveActivity(mission, index, {negative = false} = {}) {
     if (await isDone(index)) break;
     await ui(`inspect-${id}`).click();
     await stories();
+    if (!await isDone(index)) {
+      const clue = page.locator('[data-world-object="artifact:' + id + '"]');
+      if (await clue.count()) assert.ok((await clue.getAttribute('class')).includes('is-observed'), 'Inspected evidence no longer glows as a new clue.');
+    }
   }
   if (await isDone(index)) {checks.push(`activity:${activity.kind}`); return;}
   if (negative && (activity.kind === 'choose' || activity.kind === 'compare')) {
@@ -188,6 +192,10 @@ async function enterCommand(raw) {
   const terminal = page.locator('.tool-tabs [data-tool="terminal"]');
   if (!await ui('terminal-input').isVisible()) await terminal.click();
   const input = ui('terminal-input'), handle = await input.elementHandle();
+  await input.fill('');await input.focus();await page.keyboard.press('Shift+Tab');
+  assert.equal(await input.evaluate(node => document.activeElement === node), false, 'Shift+Tab leaves the terminal.');
+  await input.focus();await page.keyboard.press('Tab');
+  assert.equal(await input.evaluate(node => document.activeElement === node), false, 'An empty terminal allows ordinary Tab navigation.');
   await input.fill(raw);await input.press('Enter');
   await page.waitForFunction(node => !node.isConnected, handle);await handle.dispose();
   await stories();

@@ -246,3 +246,21 @@ body[data-motion="off"] [data-art-direction="alpine"] .alpine-ranger { animation
 @media (max-width:760px) and (orientation:portrait) {
   [data-art-direction="alpine"] .pw-world[data-play-scene="welcome"] { --scene-art:url('../assets/scenes/welcome-alpine-portrait.webp'); }
 }
+/* Inspected evidence stays available to read, but no longer advertises itself as new. */
+[data-art-direction="alpine"] .pw-clue-object.is-observed .alpine-prop {
+  filter:drop-shadow(0 4px 4px #020b1260); opacity:.75;
+}
+[data-art-direction="alpine"] .pw-clue-object.is-observed .pw-interact-dot {
+  background:#8ba99b; box-shadow:none; border-color:#a9c6b7;
+}
+[data-art-direction="alpine"] .pw-object.pw-in-reach .alpine-prop {
+  filter:drop-shadow(0 5px 4px #020b1290) drop-shadow(0 0 7px #ffe0a0aa);
+}
+/* On phones, live training replaces the header so the scene remains touchable. */
+@media (max-width:760px) and (orientation:portrait) {
+  [data-art-direction="alpine"]:has(.play-onboarding[data-world-blocked="false"]) :is(.play-topbar,.play-quest) { visibility:hidden; }
+  [data-art-direction="alpine"] .play-onboarding[data-world-blocked="false"] .onboarding-card {
+    top:max(12px,env(safe-area-inset-top,0px)); bottom:auto; max-height:230px;
+  }
+  [data-art-direction="alpine"]:has(.play-onboarding[data-world-blocked="false"]) .play-utility { top:auto; bottom:150px; }
+}

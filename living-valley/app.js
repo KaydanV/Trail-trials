@@ -26,10 +26,10 @@ import {
   renderPlayWorld,
   mountPlayWorld,
   renderGearIcon,
-} from "./play-world.js?v=20261019-alpine2";
+} from "./play-world.js?v=v5.0.0-20261021";
 import { renderPlayActivity, mountPlayActivity } from "./play-tools.js";
 import { renderRanger } from "./play-art.js";
-import { getPlayScene, tutorialBeats, controlsTutorial } from "./play-script.js?v=20261019-alpine2";
+import { getPlayScene, tutorialBeats, controlsTutorial } from "./play-script.js?v=v5.0.0-20261021";
 import { hasSeenControls, saveControlsSeen, createGuidePractice, runGuidePractice, renderControlsGuide, renderGuidePractice } from "./play-guide.js";
 import {
   createPlayState,
@@ -290,11 +290,11 @@ function header() {
 }
 function footer() {
   return (
-    '<footer class="site-footer"><span>A little adventure. Real things to figure out.</span><span>' +
+    '<footer class="site-footer"><span>Terminal Trails · Version 5</span><span>' +
     (storage.available
       ? "Saved in this browser"
       : "Temporary journey · Export a backup") +
-    '</span><a href="../">Original 24-mission expedition ↗</a></footer>'
+    '</span><a href="../classic.html">Original 24-mission expedition ↗</a></footer>'
   );
 }
 function render() {
@@ -2209,7 +2209,7 @@ document.addEventListener("keydown", (event) => {
       command(event.target.value);
     } else if (
       ["ArrowUp", "ArrowDown", "Tab"].includes(event.key) &&
-      (event.key === "Tab" || !event.target.value.includes("\n"))
+      (event.key === "Tab" ? !event.shiftKey && !!event.target.value.trim() : !event.target.value.includes("\n"))
     ) {
       event.preventDefault();
       typeKey(event.key);

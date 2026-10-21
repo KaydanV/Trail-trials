@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#081f28">
+  <meta name="description" content="Follow the Hike Trail. A story-driven cybersecurity adventure with hands-on terminal puzzles, practical decisions, and a little help from a very curious robot.">
+  <title>Terminal Trails — The Signal Academy</title>
+  <link rel="icon" href="assets/trail-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles/world.css">
+  <link rel="stylesheet" href="styles/play.css">
+</head>
+<body data-motion="on">
+  <a class="skip-link" href="#main">Skip to adventure</a>
+  <div id="app" class="app"></div>
+  <div id="dialog-backdrop" class="overlay hidden"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1"><button class="dialog-close icon-button" aria-label="Close dialog">×</button><div class="dialog-content"></div></section></div>
+  <div id="cinematic-backdrop" class="overlay hidden"><section class="cinematic" role="dialog" aria-modal="true" aria-labelledby="cinematic-title" tabindex="-1"></section></div>
+  <div id="tutorial-backdrop" class="tutorial-overlay hidden"><div class="tour-spotlight" aria-hidden="true"></div><section class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tour-title" tabindex="-1"></section></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <noscript>Terminal Trails needs JavaScript to run its local game simulation. Enable JavaScript and reload to start your adventure.</noscript>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
